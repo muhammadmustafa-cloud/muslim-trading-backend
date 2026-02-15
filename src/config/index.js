@@ -17,8 +17,12 @@ export const config = {
     },
   },
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN 
+      ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+      : (isProd ? ['https://muslim-trading.vercel.app', 'https://muslim-trading-backend.onrender.com'] : '*'),
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   },
   log: {
     level: process.env.LOG_LEVEL || (isProd ? 'info' : 'debug'),
