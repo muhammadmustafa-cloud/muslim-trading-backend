@@ -148,10 +148,12 @@ export const getHistory = async (req, res) => {
   const items = await Item.find({}).lean();
   const itemMap = new Map(items.map((i) => [i._id.toString(), i]));
   const salesWithPart = sales.map((s) => {
-    const itemIdStr = (s.itemId && (s.itemId._id || s.itemId)) || s.itemId;
-    const item = itemMap.get(itemIdStr.toString());
-    const partIdStr = (s.partId && s.partId.toString) ? s.partId.toString() : String(s.partId);
-    const part = (item?.parts || []).find((p) => p._id.toString() === partIdStr);
+    const itemIdRaw = s.itemId && (s.itemId._id || s.itemId) || s.itemId;
+    const itemIdStr = itemIdRaw != null ? String(itemIdRaw) : null;
+    const item = itemIdStr ? itemMap.get(itemIdStr) : null;
+    const partIdRaw = s.partId;
+    const partIdStr = partIdRaw != null && typeof partIdRaw.toString === 'function' ? partIdRaw.toString() : String(partIdRaw ?? '');
+    const part = (item?.parts || []).find((p) => p && p._id != null && String(p._id) === partIdStr);
     return { ...s, partName: part?.partName, partUnit: part?.unit || 'kg' };
   });
   res.json({

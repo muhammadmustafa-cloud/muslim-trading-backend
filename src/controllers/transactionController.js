@@ -22,7 +22,7 @@ async function getAccountBalance(accountId) {
 }
 
 export const list = async (req, res) => {
-  const { accountId, dateFrom, dateTo } = req.query;
+  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly } = req.query;
   const filter = {};
   if (accountId) {
     const id = new mongoose.Types.ObjectId(accountId);
@@ -31,8 +31,13 @@ export const list = async (req, res) => {
       { toAccountId: id },
     ];
   }
+  if (mazdoorId) {
+    filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+  } else if (mazdoorOnly === 'true' || mazdoorOnly === true) {
+    filter.mazdoorId = { $ne: null };
+  }
   if (dateFrom || dateTo) {
-    filter.date = {};
+    filter.date = filter.date || {};
     if (dateFrom) filter.date.$gte = new Date(dateFrom);
     if (dateTo) {
       const d = new Date(dateTo);
