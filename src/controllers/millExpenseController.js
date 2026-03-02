@@ -1,0 +1,98 @@
+import MillExpense from '../models/MillExpense.js';
+import Transaction from '../models/Transaction.js';
+import Account from '../models/Account.js';
+import { getAccountBalance } from './transactionController.js';
+import mongoose from 'mongoose';
+
+async function getOrCreateMillAccount() {
+  let account = await Account.findOne({ isMillKhata: true }).lean();
+  if (!account) {
+    account = await Account.findOne({ name: /^Mill Khata$/i }).lean();
+  }
+  if (!account) {
+    const created = await Account.create({ name: 'Mill Khata', type: 'Cash', isMillKhata: true });
+    account = created.toObject();
+  } else if (!account.isMillKhata) {
+    await Account.findByIdAndUpdate(account._id, { isMillKhata: true });
+    account = { ...account, isMillKhata: true };
+  }
+  return account;
+}
+
+export const list = async (req, res) => {
+  const { dateFrom, dateTo } = req.query;
+  const filter = {};
+  if (dateFrom || dateTo) {
+    filter.date = {};
+    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    if (dateTo) {
+      const d = new Date(dateTo);
+      d.setHours(23, 59, 59, 999);
+      filter.date.$lte = d;
+    }
+  }
+  const expenses = await MillExpense.find(filter).sort({ date: -1 }).lean();
+  const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const account = await getOrCreateMillAccount();
+  const flow = await getAccountBalance(account._id);
+  const currentBalance = (account.openingBalance ?? 0) + flow;
+
+  res.json({
+    success: true,
+    data: expenses,
+    summary: { total, accountBalance: currentBalance },
+    account: { _id: account._id, name: account.name },
+  });
+};
+
+export const create = async (req, res) => {
+  const { date, amount, category, note } = req.body;
+  const amt = Number(amount);
+  if (isNaN(amt) || amt <= 0) {
+    return res.status(400).json({ success: false, message: 'Valid amount required' });
+  }
+  const account = await getOrCreateMillAccount();
+  const balance = (account.openingBalance ?? 0) + (await getAccountBalance(account._id));
+  if (balance < amt) {
+    return res.status(400).json({ success: false, message: `Insufficient balance in Mill Khata. Available: ${balance}` });
+  }
+
+  const expense = await MillExpense.create({
+    date: date ? new Date(date) : new Date(),
+    amount: amt,
+    category: (category || '').trim(),
+    note: (note || '').trim(),
+  });
+
+  await Transaction.create({
+    date: expense.date,
+    type: 'withdraw',
+    fromAccountId: account._id,
+    toAccountId: null,
+    amount: amt,
+    category: 'mill_expense',
+    note: (note || '').trim() ? `Mill: ${(note || '').trim()}` : `Mill expense — ${(category || 'Expense').trim()}`,
+  });
+
+  const populated = await MillExpense.findById(expense._id).lean();
+  res.status(201).json({ success: true, data: populated });
+};
+
+export const remove = async (req, res) => {
+  const expense = await MillExpense.findById(req.params.id);
+  if (!expense) {
+    return res.status(404).json({ success: false, message: 'Mill expense not found' });
+  }
+  const account = await getOrCreateMillAccount();
+  await Transaction.create({
+    date: new Date(),
+    type: 'deposit',
+    fromAccountId: null,
+    toAccountId: account._id,
+    amount: expense.amount,
+    category: 'mill_expense_reversal',
+    note: `Reversal: deleted mill expense ${expense._id}`,
+  });
+  await MillExpense.findByIdAndDelete(req.params.id);
+  res.json({ success: true, message: 'Mill expense deleted' });
+};

@@ -18,7 +18,7 @@ export const list = async (req, res) => {
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
 
   const entries = await StockEntry.find(filter)
-    .populate('itemId', 'name unit')
+    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .sort({ date: -1 })
@@ -28,7 +28,7 @@ export const list = async (req, res) => {
 
 export const getById = async (req, res) => {
   const entry = await StockEntry.findById(req.params.id)
-    .populate('itemId', 'name unit parts')
+    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -39,36 +39,35 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, amount, amountPaid, accountId, notes, outputs } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, amountPaid, truckNumber, accountId, notes } = req.body;
   if (!itemId || !supplierId) {
     return res.status(400).json({ success: false, message: 'itemId and supplierId are required' });
   }
   const item = await Item.findById(itemId).lean();
   if (!item) return res.status(400).json({ success: false, message: 'Item not found' });
 
-  const normalizedOutputs = (Array.isArray(outputs) ? outputs : [])
-    .filter((o) => o && o.partId != null && Number(o.quantity) >= 0)
-    .map((o) => ({
-      partId: new mongoose.Types.ObjectId(o.partId),
-      quantity: Number(o.quantity),
-    }));
+  const k = Number(kattay) || 0;
+  const kg = Number(kgPerKata) || 0;
+  const computedWeight = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : 0);
 
   const entry = await StockEntry.create({
     date: date ? new Date(date) : new Date(),
     itemId,
     supplierId,
-    receivedWeight: receivedWeight != null ? Number(receivedWeight) : 0,
-    kattay: Number(kattay) || 0,
-    kgPerKata: Number(kgPerKata) || 0,
+    receivedWeight: computedWeight,
+    kattay: k,
+    kgPerKata: kg,
+    millWeight: millWeight != null ? Number(millWeight) : 0,
+    supplierWeight: supplierWeight != null ? Number(supplierWeight) : 0,
     amount: amount != null ? Number(amount) : 0,
-    amountPaid: Number(amountPaid) || 0,
+    amountPaid: amountPaid != null ? Number(amountPaid) : 0,
+    truckNumber: (truckNumber || '').trim(),
     accountId: accountId || null,
     notes: (notes || '').trim(),
-    outputs: normalizedOutputs,
   });
 
   const populated = await StockEntry.findById(entry._id)
-    .populate('itemId', 'name unit')
+    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -80,28 +79,26 @@ export const update = async (req, res) => {
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, amount, amountPaid, accountId, notes, outputs } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, amountPaid, truckNumber, accountId, notes } = req.body;
   if (date != null) entry.date = new Date(date);
   if (itemId != null) entry.itemId = itemId;
   if (supplierId != null) entry.supplierId = supplierId;
-  if (receivedWeight != null) entry.receivedWeight = Number(receivedWeight);
-  if (kattay != null) entry.kattay = Number(kattay) || 0;
-  if (kgPerKata != null) entry.kgPerKata = Number(kgPerKata) || 0;
+  if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
+  const k = kattay != null ? Number(kattay) || 0 : entry.kattay;
+  const kg = kgPerKata != null ? Number(kgPerKata) || 0 : entry.kgPerKata;
+  if (k > 0 && kg > 0) entry.receivedWeight = k * kg;
+  else if (receivedWeight != null) entry.receivedWeight = Number(receivedWeight);
+  if (kattay != null) entry.kattay = k;
+  if (kgPerKata != null) entry.kgPerKata = kg;
+  if (millWeight != null) entry.millWeight = Number(millWeight) || 0;
+  if (supplierWeight != null) entry.supplierWeight = Number(supplierWeight) || 0;
   if (amount != null) entry.amount = Number(amount);
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
   if (accountId !== undefined) entry.accountId = accountId || null;
   if (notes !== undefined) entry.notes = (notes || '').trim();
-  if (Array.isArray(outputs)) {
-    entry.outputs = outputs
-      .filter((o) => o && o.partId != null && Number(o.quantity) >= 0)
-      .map((o) => ({
-        partId: new mongoose.Types.ObjectId(o.partId),
-        quantity: Number(o.quantity),
-      }));
-  }
   await entry.save();
   const populated = await StockEntry.findById(entry._id)
-    .populate('itemId', 'name unit')
+    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();

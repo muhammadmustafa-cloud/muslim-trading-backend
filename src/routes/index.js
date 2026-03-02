@@ -5,6 +5,7 @@ import mazdoorRoutes from './mazdoorRoutes.js';
 import mazdoorItemRoutes from './mazdoorItemRoutes.js';
 import mazdoorExpenseRoutes from './mazdoorExpenseRoutes.js';
 import accountRoutes from './accountRoutes.js';
+import categoryRoutes from './categoryRoutes.js';
 import itemRoutes from './itemRoutes.js';
 import stockEntryRoutes from './stockEntryRoutes.js';
 import stockRoutes from './stockRoutes.js';
@@ -12,6 +13,7 @@ import saleRoutes from './saleRoutes.js';
 import transactionRoutes from './transactionRoutes.js';
 import dashboardRoutes from './dashboardRoutes.js';
 import dailyMemoRoutes from './dailyMemoRoutes.js';
+import millExpenseRoutes from './millExpenseRoutes.js';
 
 const router = Router();
 
@@ -21,6 +23,7 @@ router.use('/mazdoor', mazdoorRoutes);
 router.use('/mazdoor-items', mazdoorItemRoutes);
 router.use('/mazdoor-expenses', mazdoorExpenseRoutes);
 router.use('/accounts', accountRoutes);
+router.use('/categories', categoryRoutes);
 router.use('/items', itemRoutes);
 router.use('/stock-entries', stockEntryRoutes);
 router.use('/stock', stockRoutes);
@@ -28,6 +31,7 @@ router.use('/sales', saleRoutes);
 router.use('/transactions', transactionRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/daily-memo', dailyMemoRoutes);
+router.use('/mill-expenses', millExpenseRoutes);
 
 // Base API info
 router.get('/', (req, res) => {

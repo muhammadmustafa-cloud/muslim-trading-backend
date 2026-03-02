@@ -1,5 +1,6 @@
 import Transaction from '../models/Transaction.js';
 import Sale from '../models/Sale.js';
+import StockEntry from '../models/StockEntry.js';
 import mongoose from 'mongoose';
 
 /**
@@ -21,8 +22,123 @@ async function getAccountBalance(accountId) {
   return credits - debits;
 }
 
+/**
+ * Build date filter object for query.
+ */
+function buildDateFilter(dateFrom, dateTo) {
+  const filter = {};
+  if (dateFrom || dateTo) {
+    filter.date = {};
+    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    if (dateTo) {
+      const d = new Date(dateTo);
+      d.setHours(23, 59, 59, 999);
+      filter.date.$lte = d;
+    }
+  }
+  return filter;
+}
+
 export const list = async (req, res) => {
-  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly } = req.query;
+  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified } = req.query;
+  const includeSalesAndStock = unified === 'true' || unified === '1';
+
+  if (includeSalesAndStock) {
+    const id = accountId ? new mongoose.Types.ObjectId(accountId) : null;
+    const dateF = buildDateFilter(dateFrom, dateTo);
+
+    const [transactions, sales, stockEntries] = await Promise.all([
+      (() => {
+        const filter = { ...dateF };
+        if (id) filter.$or = [{ fromAccountId: id }, { toAccountId: id }];
+        if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+        else if (mazdoorOnly === 'true' || mazdoorOnly === true) filter.mazdoorId = { $ne: null };
+        return Transaction.find(filter)
+          .populate('fromAccountId', 'name')
+          .populate('toAccountId', 'name')
+          .populate('supplierId', 'name')
+          .populate('mazdoorId', 'name')
+          .sort({ date: -1 })
+          .lean();
+      })(),
+      (() => {
+        const filter = { ...dateF, amountReceived: { $gt: 0 } };
+        if (id) filter.accountId = id;
+        return Sale.find(filter)
+          .populate('customerId', 'name')
+          .populate('accountId', 'name')
+          .populate('itemId', 'name')
+          .sort({ date: -1 })
+          .lean();
+      })(),
+      (() => {
+        const filter = { ...dateF, $or: [{ amountPaid: { $gt: 0 } }, { amount: { $gt: 0 } }] };
+        if (id) filter.accountId = id;
+        return StockEntry.find(filter)
+          .populate('supplierId', 'name')
+          .populate('accountId', 'name')
+          .populate('itemId', 'name')
+          .sort({ date: -1 })
+          .lean();
+      })(),
+    ]);
+
+    const rows = [];
+    transactions.forEach((t) => {
+      rows.push({
+        _id: t._id,
+        date: t.date,
+        type: t.type,
+        fromAccountId: t.fromAccountId,
+        toAccountId: t.toAccountId,
+        amount: t.amount,
+        category: t.category || '',
+        note: t.note || '',
+        source: 'transaction',
+        referenceId: t._id,
+      });
+    });
+    sales.forEach((s) => {
+      const amt = Number(s.amountReceived) || 0;
+      if (amt <= 0 || !s.accountId) return;
+      rows.push({
+        _id: `sale-${s._id}`,
+        date: s.date,
+        type: 'sale',
+        fromAccountId: null,
+        toAccountId: s.accountId,
+        amount: amt,
+        category: 'Sale',
+        note: (s.notes || '').trim() || (s.customerId?.name ? `Customer: ${s.customerId.name}` : ''),
+        source: 'sale',
+        referenceId: s._id,
+        customerName: s.customerId?.name,
+        itemName: s.itemId?.name,
+      });
+    });
+    stockEntries.forEach((e) => {
+      const amt = Number(e.amountPaid) || Number(e.amount) || 0;
+      if (amt <= 0 || !e.accountId) return;
+      rows.push({
+        _id: `stock-${e._id}`,
+        date: e.date,
+        type: 'purchase',
+        fromAccountId: e.accountId,
+        toAccountId: null,
+        amount: amt,
+        category: 'Purchase',
+        note: (e.notes || '').trim() || (e.supplierId?.name ? `Supplier: ${e.supplierId.name}` : ''),
+        source: 'stock_entry',
+        referenceId: e._id,
+        supplierName: e.supplierId?.name,
+        itemName: e.itemId?.name,
+      });
+    });
+
+    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return res.json({ success: true, data: rows });
+  }
+
   const filter = {};
   if (accountId) {
     const id = new mongoose.Types.ObjectId(accountId);
@@ -37,13 +153,7 @@ export const list = async (req, res) => {
     filter.mazdoorId = { $ne: null };
   }
   if (dateFrom || dateTo) {
-    filter.date = filter.date || {};
-    if (dateFrom) filter.date.$gte = new Date(dateFrom);
-    if (dateTo) {
-      const d = new Date(dateTo);
-      d.setHours(23, 59, 59, 999);
-      filter.date.$lte = d;
-    }
+    Object.assign(filter, buildDateFilter(dateFrom, dateTo));
   }
 
   const transactions = await Transaction.find(filter)

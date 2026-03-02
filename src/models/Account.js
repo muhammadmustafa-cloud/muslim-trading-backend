@@ -7,6 +7,8 @@ const accountSchema = new mongoose.Schema(
     accountNumber: { type: String, trim: true, default: '' },
     openingBalance: { type: Number, default: 0 },
     notes: { type: String, trim: true, default: '' },
+    isDailyKhata: { type: Boolean, default: false },
+    isMillKhata: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

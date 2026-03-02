@@ -2,7 +2,6 @@ import Customer from '../models/Customer.js';
 import Supplier from '../models/Supplier.js';
 import Sale from '../models/Sale.js';
 import StockEntry from '../models/StockEntry.js';
-import Item from '../models/Item.js';
 
 export const list = async (req, res) => {
   const search = (req.query.search || '').trim();
@@ -131,7 +130,7 @@ export const getHistory = async (req, res) => {
   const [sales, stockEntries] = await Promise.all([
     fetchSales
       ? Sale.find(saleMatch)
-          .populate('itemId', 'name')
+          .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
           .populate('accountId', 'name')
           .sort({ date: -1 })
           .limit(500)
@@ -145,22 +144,17 @@ export const getHistory = async (req, res) => {
           .lean()
       : [],
   ]);
-  const items = await Item.find({}).lean();
-  const itemMap = new Map(items.map((i) => [i._id.toString(), i]));
-  const salesWithPart = sales.map((s) => {
-    const itemIdRaw = s.itemId && (s.itemId._id || s.itemId) || s.itemId;
-    const itemIdStr = itemIdRaw != null ? String(itemIdRaw) : null;
-    const item = itemIdStr ? itemMap.get(itemIdStr) : null;
-    const partIdRaw = s.partId;
-    const partIdStr = partIdRaw != null && typeof partIdRaw.toString === 'function' ? partIdRaw.toString() : String(partIdRaw ?? '');
-    const part = (item?.parts || []).find((p) => p && p._id != null && String(p._id) === partIdStr);
-    return { ...s, partName: part?.partName, partUnit: part?.unit || 'kg' };
-  });
+  const salesWithItem = sales.map((s) => ({
+    ...s,
+    itemName: s.itemId?.name ?? '—',
+    category: s.itemId?.categoryId?.name ?? '—',
+    quality: s.itemId?.quality ?? '—',
+  }));
   res.json({
     success: true,
     data: {
       name: customer.name,
-      sales: salesWithPart,
+      sales: salesWithItem,
       stockEntries,
       linkedSupplier: customer.linkedSupplierId ? { _id: customer.linkedSupplierId } : null,
     },

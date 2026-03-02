@@ -3,12 +3,13 @@ import Supplier from '../models/Supplier.js';
 import Mazdoor from '../models/Mazdoor.js';
 import Account from '../models/Account.js';
 import Sale from '../models/Sale.js';
+import StockEntry from '../models/StockEntry.js';
 import { getAccountBalance } from './transactionController.js';
 import { getCurrentStockData } from './stockController.js';
 
 /**
- * Dashboard summary: counts, total balance, today's sales, current stock.
- * Query: lowStockThreshold (number) — parts with quantity < this are flagged as low stock.
+ * Dashboard summary: counts, total balance, today's sales, current stock, overall profit.
+ * Query: lowStockThreshold (number) — items with quantity < this are flagged as low stock.
  */
 export const getSummary = async (req, res) => {
   const lowStockThreshold = Number(req.query.lowStockThreshold);
@@ -19,16 +20,18 @@ export const getSummary = async (req, res) => {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
-  const [customersCount, suppliersCount, mazdoorCount, accounts, todaySalesResult, stockData] = await Promise.all([
+  const [customersCount, suppliersCount, mazdoorCount, accounts, todaySalesResult, stockData, totalPurchaseResult, totalSalesResult] = await Promise.all([
     Customer.countDocuments(),
     Supplier.countDocuments(),
     Mazdoor.countDocuments(),
     Account.find({}).lean(),
     Sale.aggregate([
       { $match: { date: { $gte: todayStart, $lte: todayEnd } } },
-      { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$amountReceived' } } },
+      { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$amountReceived' } } }, // amount received today
     ]),
     getCurrentStockData(),
+    StockEntry.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Sale.aggregate([{ $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
   ]);
 
   let totalBalance = 0;
@@ -38,6 +41,10 @@ export const getSummary = async (req, res) => {
   }
 
   const todaySales = todaySalesResult[0] || { count: 0, totalAmount: 0 };
+  const totalPurchaseCost = totalPurchaseResult[0]?.total ?? 0;
+  const totalSalesRevenue = totalSalesResult[0]?.total ?? 0;
+  const overallProfit = totalSalesRevenue - totalPurchaseCost;
+
   const stockSummary = stockData.map((row) => ({
     ...row,
     lowStock: useLowStock && row.quantity < lowStockThreshold,
@@ -50,6 +57,11 @@ export const getSummary = async (req, res) => {
       counts: { customers: customersCount, suppliers: suppliersCount, mazdoor: mazdoorCount },
       totalBalance,
       todaySales: { count: todaySales.count, totalAmount: todaySales.totalAmount },
+      profitSummary: {
+        totalPurchaseCost,
+        totalSalesRevenue,
+        overallProfit,
+      },
       stockSummary,
       ...(useLowStock && { lowStockCount }),
     },

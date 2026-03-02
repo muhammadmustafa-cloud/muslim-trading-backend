@@ -3,15 +3,21 @@ import StockEntry from '../models/StockEntry.js';
 import Sale from '../models/Sale.js';
 import mongoose from 'mongoose';
 
+const itemListSelect = 'name categoryId quality';
+const itemListPopulate = { path: 'categoryId', select: 'name' };
+
 export const list = async (req, res) => {
   const search = (req.query.search || '').trim();
-  const filter = search ? { name: new RegExp(search, 'i') } : {};
-  const items = await Item.find(filter).sort({ name: 1 }).lean();
+  const categoryId = (req.query.categoryId || '').trim();
+  const filter = {};
+  if (search) filter.name = new RegExp(search, 'i');
+  if (categoryId) filter.categoryId = new mongoose.Types.ObjectId(categoryId);
+  const items = await Item.find(filter).populate(itemListPopulate).sort({ name: 1 }).lean();
   res.json({ success: true, data: items });
 };
 
 export const getById = async (req, res) => {
-  const item = await Item.findById(req.params.id).lean();
+  const item = await Item.findById(req.params.id).populate(itemListPopulate).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
   }
@@ -19,26 +25,21 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { name, unit, parts } = req.body;
+  const { name, categoryId, quality } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
-  const normalizedParts = (Array.isArray(parts) ? parts : [])
-    .filter((p) => p && (p.partName || '').trim())
-    .map((p) => ({
-      partName: (p.partName || '').trim(),
-      unit: (p.unit || 'kg').trim() || 'kg',
-    }));
   const item = await Item.create({
     name: name.trim(),
-    unit: (unit || 'kg').trim() || 'kg',
-    parts: normalizedParts,
+    categoryId: categoryId || null,
+    quality: (quality || '').trim(),
   });
-  res.status(201).json({ success: true, data: item });
+  const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
+  res.status(201).json({ success: true, data: populated });
 };
 
 export const update = async (req, res) => {
-  const { name, unit, parts } = req.body;
+  const { name, categoryId, quality } = req.body;
   const item = await Item.findById(req.params.id);
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
@@ -48,21 +49,14 @@ export const update = async (req, res) => {
     if (!trimmed) return res.status(400).json({ success: false, message: 'Name is required' });
     item.name = trimmed;
   }
-  if (unit !== undefined) item.unit = (unit || 'kg').trim() || 'kg';
-  if (Array.isArray(parts)) {
-    item.parts = parts
-      .filter((p) => p && (p.partName || '').trim())
-      .map((p) => ({
-        partName: (p.partName || '').trim(),
-        unit: (p.unit || 'kg').trim() || 'kg',
-      }));
-  }
+  if (categoryId !== undefined) item.categoryId = categoryId || null;
+  if (quality !== undefined) item.quality = (quality || '').trim();
   await item.save();
-  res.json({ success: true, data: item.toObject() });
+  const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
+  res.json({ success: true, data: populated });
 };
 
 export const remove = async (req, res) => {
-  // Phase 3/4: check StockEntry and Sale usage — for now allow delete
   const deleted = await Item.findByIdAndDelete(req.params.id);
   if (!deleted) {
     return res.status(404).json({ success: false, message: 'Item not found' });
@@ -71,11 +65,11 @@ export const remove = async (req, res) => {
 };
 
 /**
- * Item khata (ledger): kitna daala (purchases), kis ko kitna becha (sales), profit.
+ * Item khata (ledger): purchases (stock entries), sales, profit.
  * Query: dateFrom, dateTo (YYYY-MM-DD).
  */
 export const getKhata = async (req, res) => {
-  const item = await Item.findById(req.params.id).lean();
+  const item = await Item.findById(req.params.id).populate(itemListPopulate).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
   }
@@ -110,10 +104,12 @@ export const getKhata = async (req, res) => {
       .lean(),
   ]);
 
-  const salesWithPart = sales.map((s) => {
-    const part = (item.parts || []).find((p) => p._id.toString() === (s.partId && s.partId.toString()));
-    return { ...s, partName: part?.partName, partUnit: part?.unit || 'kg' };
-  });
+  const salesWithItem = sales.map((s) => ({
+    ...s,
+    itemName: item.name,
+    category: item.categoryId?.name ?? '',
+    quality: item.quality ?? '',
+  }));
 
   const totalCost = purchases.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
   const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.amountReceived) || 0), 0);
@@ -123,9 +119,10 @@ export const getKhata = async (req, res) => {
     success: true,
     data: {
       name: item.name,
-      unit: item.unit,
+      category: item.categoryId?.name ?? '',
+      quality: item.quality ?? '',
       purchases,
-      sales: salesWithPart,
+      sales: salesWithItem,
       totalCost,
       totalRevenue,
       profit,

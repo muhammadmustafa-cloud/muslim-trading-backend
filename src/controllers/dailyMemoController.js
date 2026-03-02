@@ -198,5 +198,16 @@ export const getDailyMemo = async (req, res) => {
 
   rows.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  res.json({ success: true, data: rows });
+  const totalIn = rows.filter((r) => r.amountType === 'in').reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalOut = rows.filter((r) => r.amountType === 'out').reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  res.json({
+    success: true,
+    data: rows,
+    summary: {
+      totalIn,
+      totalOut,
+      net: totalIn - totalOut,
+    },
+  });
 };

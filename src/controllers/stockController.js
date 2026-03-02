@@ -4,60 +4,56 @@ import Item from '../models/Item.js';
 import mongoose from 'mongoose';
 
 /**
- * Returns current stock per part: sum(stock entry outputs) − sum(sales).
- * Reusable for API and dashboard.
+ * Returns current stock per item: sum(stock entry quantity) − sum(sales quantity).
  */
 export async function getCurrentStockData() {
   const entries = await StockEntry.find({}).lean();
-  const byPart = new Map(); // key: partId.toString() -> { partId, itemId, quantity }
+  const byItem = new Map(); // key: itemId.toString() -> { itemId, quantity }
 
   for (const entry of entries) {
-    if (!entry.outputs || !entry.itemId) continue;
+    if (!entry.itemId) continue;
     const itemId = entry.itemId && typeof entry.itemId === 'object' && entry.itemId._id ? entry.itemId._id : entry.itemId;
-    for (const o of entry.outputs) {
-      const key = o.partId.toString();
-      if (!byPart.has(key)) {
-        byPart.set(key, { partId: o.partId, itemId, quantity: 0 });
-      }
-      const rec = byPart.get(key);
-      rec.quantity += Number(o.quantity) || 0;
+    const key = itemId.toString();
+    if (!byItem.has(key)) {
+      byItem.set(key, { itemId, quantity: 0 });
     }
+    const rec = byItem.get(key);
+    rec.quantity += Number(entry.receivedWeight) || 0;
   }
 
   const sales = await Sale.find({}).lean();
   for (const s of sales) {
-    if (!s.partId) continue;
-    const key = s.partId.toString();
-    if (byPart.has(key)) {
-      byPart.get(key).quantity -= Number(s.quantity) || 0;
+    if (!s.itemId) continue;
+    const itemId = (s.itemId && (s.itemId._id || s.itemId)) ? (s.itemId._id || s.itemId) : s.itemId;
+    const key = itemId.toString();
+    if (!byItem.has(key)) {
+      byItem.set(key, { itemId, quantity: 0 });
     }
+    byItem.get(key).quantity -= Number(s.quantity) || 0;
   }
 
-  const items = await Item.find({}).lean();
+  const items = await Item.find({}).populate('categoryId', 'name').lean();
   const itemMap = new Map(items.map((i) => [i._id.toString(), i]));
 
   const result = [];
-  for (const [, rec] of byPart) {
+  for (const [, rec] of byItem) {
     const item = itemMap.get(rec.itemId.toString());
     if (!item) continue;
-    const part = (item.parts || []).find((p) => p._id.toString() === rec.partId.toString());
-    if (!part) continue;
     result.push({
       itemId: item._id,
       itemName: item.name,
-      partId: rec.partId,
-      partName: part.partName,
-      unit: part.unit || 'kg',
+      category: item.categoryId?.name || '',
+      quality: item.quality || '',
       quantity: Math.max(0, rec.quantity),
     });
   }
 
-  result.sort((a, b) => a.itemName.localeCompare(b.itemName) || a.partName.localeCompare(b.partName));
+  result.sort((a, b) => a.itemName.localeCompare(b.itemName) || (a.category || '').localeCompare(b.category || '') || (a.quality || '').localeCompare(b.quality || ''));
   return result;
 }
 
 /**
- * Current stock per part — API handler.
+ * Current stock per item — API handler.
  */
 export const currentStock = async (req, res) => {
   const data = await getCurrentStockData();
