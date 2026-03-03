@@ -2,10 +2,12 @@ import app from './app.js';
 import { config } from './config/index.js';
 import connectDB from './config/database.js';
 import logger from './utils/logger.js';
+import { seedDefaultAccounts } from './seed/defaultAccounts.js';
 
 const startServer = async () => {
   try {
     await connectDB();
+    await seedDefaultAccounts();
   } catch (error) {
     console.error('Database connection failed:', error.message);
     process.exit(1);
