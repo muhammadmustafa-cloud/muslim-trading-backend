@@ -15,11 +15,13 @@ export async function getCurrentStockData() {
     const itemId = entry.itemId && typeof entry.itemId === 'object' && entry.itemId._id ? entry.itemId._id : entry.itemId;
     const key = itemId.toString();
     if (!byItem.has(key)) {
-      byItem.set(key, { itemId, quantity: 0, kattay: 0 });
+      byItem.set(key, { itemId, quantity: 0, kattay: 0, millWeight: 0, supplierWeight: 0 });
     }
     const rec = byItem.get(key);
     rec.quantity += Number(entry.receivedWeight) || 0;
     rec.kattay += Number(entry.kattay) || 0;
+    rec.millWeight += Number(entry.millWeight) || 0;
+    rec.supplierWeight += Number(entry.supplierWeight) || 0;
   }
 
   const sales = await Sale.find({}).lean();
@@ -28,11 +30,13 @@ export async function getCurrentStockData() {
     const itemId = (s.itemId && (s.itemId._id || s.itemId)) ? (s.itemId._id || s.itemId) : s.itemId;
     const key = itemId.toString();
     if (!byItem.has(key)) {
-      byItem.set(key, { itemId, quantity: 0, kattay: 0 });
+      byItem.set(key, { itemId, quantity: 0, kattay: 0, millWeight: 0, supplierWeight: 0 });
     }
     const saleRec = byItem.get(key);
     saleRec.quantity -= Number(s.quantity) || 0;
     saleRec.kattay -= Number(s.kattay) || 0;
+    saleRec.millWeight -= Number(s.quantity) || 0;
+    saleRec.supplierWeight -= Number(s.quantity) || 0;
   }
 
   const items = await Item.find({}).populate('categoryId', 'name').lean();
@@ -49,6 +53,8 @@ export async function getCurrentStockData() {
       quality: item.quality || '',
       quantity: Math.max(0, rec.quantity),
       kattay: Math.max(0, rec.kattay),
+      millWeight: Math.max(0, rec.millWeight),
+      supplierWeight: Math.max(0, rec.supplierWeight),
     });
   }
 
