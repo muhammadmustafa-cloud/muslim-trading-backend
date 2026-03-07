@@ -10,6 +10,5 @@ router.get('/:id', asyncHandler(stockEntryController.getById));
 router.post('/', asyncHandler(stockEntryController.create));
 router.put('/:id', asyncHandler(stockEntryController.update));
 router.post('/:id/pay', asyncHandler(stockEntryController.payEntry));
-router.delete('/:id', asyncHandler(stockEntryController.remove));
 
 export default router;

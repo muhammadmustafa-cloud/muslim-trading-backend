@@ -97,21 +97,3 @@ export const create = async (req, res) => {
   res.status(201).json({ success: true, data: populated });
 };
 
-export const remove = async (req, res) => {
-  const expense = await MillExpense.findById(req.params.id);
-  if (!expense) {
-    return res.status(404).json({ success: false, message: 'Mill expense not found' });
-  }
-  const account = await getOrCreateMillAccount();
-  await Transaction.create({
-    date: new Date(),
-    type: 'deposit',
-    fromAccountId: null,
-    toAccountId: account._id,
-    amount: expense.amount,
-    category: 'mill_expense_reversal',
-    note: `Reversal: deleted mill expense ${expense._id}`,
-  });
-  await MillExpense.findByIdAndDelete(req.params.id);
-  res.json({ success: true, message: 'Mill expense deleted' });
-};

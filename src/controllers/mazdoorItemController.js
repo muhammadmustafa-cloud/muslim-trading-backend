@@ -47,10 +47,3 @@ export const update = async (req, res) => {
   res.json({ success: true, data: item });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await MazdoorItem.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Mazdoor item not found' });
-  }
-  res.json({ success: true, message: 'Mazdoor item deleted' });
-};

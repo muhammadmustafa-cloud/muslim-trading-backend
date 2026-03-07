@@ -93,16 +93,6 @@ export const update = async (req, res) => {
   res.json({ success: true, data: updated });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await Supplier.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Supplier not found' });
-  }
-  if (deleted.linkedCustomerId) {
-    await Customer.findByIdAndUpdate(deleted.linkedCustomerId, { isAlsoSupplier: false, linkedSupplierId: null });
-  }
-  res.json({ success: true, message: 'Supplier deleted' });
-};
 
 /** History: stock entries (unse khareeda) + sales (unko becha) if linked customer. Query: dateFrom, dateTo, type=sales|stock */
 export const getHistory = async (req, res) => {

@@ -238,12 +238,5 @@ export const getById = async (req, res) => {
   res.json({ success: true, data: transaction });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await Transaction.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Transaction not found' });
-  }
-  res.json({ success: true, message: 'Transaction deleted' });
-};
 
 export { getAccountBalance };

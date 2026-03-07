@@ -90,14 +90,3 @@ export const create = async (req, res) => {
   res.status(201).json({ success: true, data: populated });
 };
 
-export const remove = async (req, res) => {
-  const expense = await MazdoorExpense.findById(req.params.id);
-  if (!expense) {
-    return res.status(404).json({ success: false, message: 'Mazdoor expense not found' });
-  }
-  if (expense.transactionId) {
-    await Transaction.findByIdAndDelete(expense.transactionId);
-  }
-  await MazdoorExpense.findByIdAndDelete(req.params.id);
-  res.json({ success: true, message: 'Mazdoor expense deleted' });
-};

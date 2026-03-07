@@ -68,13 +68,6 @@ export const update = async (req, res) => {
   res.json({ success: true, data: account });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await Account.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Account not found' });
-  }
-  res.json({ success: true, message: 'Account deleted' });
-};
 
 /** GET /accounts/daily-khata — returns the account marked as Daily Khata (or null) */
 export const getDailyKhataAccount = async (req, res) => {

@@ -215,13 +215,6 @@ export const update = async (req, res) => {
   res.json({ success: true, data: row });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await Sale.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Sale not found' });
-  }
-  res.json({ success: true, message: 'Sale deleted' });
-};
 
 /**
  * Collect payment against a specific Sale (deposit).

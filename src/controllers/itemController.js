@@ -56,13 +56,6 @@ export const update = async (req, res) => {
   res.json({ success: true, data: populated });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await Item.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Item not found' });
-  }
-  res.json({ success: true, message: 'Item deleted' });
-};
 
 /**
  * Item khata (ledger): purchases (stock entries), sales, profit.

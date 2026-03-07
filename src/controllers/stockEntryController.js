@@ -134,13 +134,6 @@ export const update = async (req, res) => {
   res.json({ success: true, data: populated });
 };
 
-export const remove = async (req, res) => {
-  const deleted = await StockEntry.findByIdAndDelete(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ success: false, message: 'Stock entry not found' });
-  }
-  res.json({ success: true, message: 'Stock entry deleted' });
-};
 
 export const payEntry = async (req, res) => {
   const { amount, accountId, date, note } = req.body;

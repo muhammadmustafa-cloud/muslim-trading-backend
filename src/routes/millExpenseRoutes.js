@@ -6,6 +6,5 @@ const router = Router();
 
 router.get('/', asyncHandler(millExpenseController.list));
 router.post('/', asyncHandler(millExpenseController.create));
-router.delete('/:id', asyncHandler(millExpenseController.remove));
 
 export default router;
