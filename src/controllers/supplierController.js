@@ -130,18 +130,18 @@ export const getHistory = async (req, res) => {
   const [stockEntries, sales] = await Promise.all([
     fetchStock
       ? StockEntry.find(stockMatch)
-          .populate('itemId', 'name')
-          .sort({ date: -1 })
-          .limit(500)
-          .lean()
+        .populate('itemId', 'name')
+        .sort({ date: -1 })
+        .limit(500)
+        .lean()
       : [],
     fetchSales && saleMatch
       ? Sale.find(saleMatch)
-          .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
-          .populate('accountId', 'name')
-          .sort({ date: -1 })
-          .limit(500)
-          .lean()
+        .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+        .populate('accountId', 'name')
+        .sort({ date: -1 })
+        .limit(500)
+        .lean()
       : [],
   ]);
   const salesWithItem = sales.map((s) => ({
@@ -159,4 +159,53 @@ export const getHistory = async (req, res) => {
       linkedCustomer: supplier.linkedCustomerId ? { _id: supplier.linkedCustomerId } : null,
     },
   });
+};
+
+/** Get all suppliers with outstanding balances (Payables) */
+export const getPayables = async (req, res) => {
+  const payables = await StockEntry.aggregate([
+    { $match: { paymentStatus: { $ne: 'paid' }, amount: { $gt: 0 } } },
+    {
+      $group: {
+        _id: '$supplierId',
+        totalBillAmount: { $sum: '$amount' },
+        totalPaidAmount: { $sum: '$amountPaid' },
+        pendingBillsCount: { $sum: 1 },
+        bills: {
+          $push: {
+            _id: '$_id',
+            date: '$date',
+            itemId: '$itemId',
+            amount: '$amount',
+            amountPaid: '$amountPaid',
+            dueDate: '$dueDate',
+            paymentStatus: '$paymentStatus',
+          }
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: 'suppliers',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'supplier'
+      }
+    },
+    { $unwind: '$supplier' },
+    {
+      $project: {
+        supplierId: '$_id',
+        supplierName: '$supplier.name',
+        totalBillAmount: 1,
+        totalPaidAmount: 1,
+        totalRemaining: { $subtract: ['$totalBillAmount', '$totalPaidAmount'] },
+        pendingBillsCount: 1,
+        bills: 1
+      }
+    },
+    { $sort: { totalRemaining: -1 } }
+  ]);
+
+  res.json({ success: true, data: payables });
 };

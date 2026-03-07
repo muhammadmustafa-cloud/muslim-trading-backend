@@ -5,6 +5,7 @@ import * as supplierController from '../controllers/supplierController.js';
 const router = Router();
 
 router.get('/', asyncHandler(supplierController.list));
+router.get('/payables', asyncHandler(supplierController.getPayables));
 router.get('/:id/history', asyncHandler(supplierController.getHistory));
 router.get('/:id', asyncHandler(supplierController.getById));
 router.post('/', asyncHandler(supplierController.create));

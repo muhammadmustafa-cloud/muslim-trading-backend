@@ -130,18 +130,18 @@ export const getHistory = async (req, res) => {
   const [sales, stockEntries] = await Promise.all([
     fetchSales
       ? Sale.find(saleMatch)
-          .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
-          .populate('accountId', 'name')
-          .sort({ date: -1 })
-          .limit(500)
-          .lean()
+        .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+        .populate('accountId', 'name')
+        .sort({ date: -1 })
+        .limit(500)
+        .lean()
       : [],
     fetchStock && stockMatch
       ? StockEntry.find(stockMatch)
-          .populate('itemId', 'name')
-          .sort({ date: -1 })
-          .limit(500)
-          .lean()
+        .populate('itemId', 'name')
+        .sort({ date: -1 })
+        .limit(500)
+        .lean()
       : [],
   ]);
   const salesWithItem = sales.map((s) => ({
@@ -159,4 +159,51 @@ export const getHistory = async (req, res) => {
       linkedSupplier: customer.linkedSupplierId ? { _id: customer.linkedSupplierId } : null,
     },
   });
+};
+
+/**
+ * Returns customers with outstanding receivables (unpaid/partial sales), grouped by customer.
+ */
+export const getReceivables = async (req, res) => {
+  const sales = await Sale.find({ paymentStatus: { $in: ['pending', 'partial'] } })
+    .populate('customerId', 'name')
+    .populate({ path: 'itemId', select: 'name' })
+    .sort({ dueDate: 1 })
+    .lean();
+
+  const grouped = {};
+  for (const s of sales) {
+    const cId = s.customerId?._id?.toString();
+    if (!cId) continue;
+    if (!grouped[cId]) {
+      grouped[cId] = {
+        customerId: cId,
+        customerName: s.customerId?.name || '—',
+        totalAmount: 0,
+        totalReceived: 0,
+        totalRemaining: 0,
+        pendingBillsCount: 0,
+        bills: [],
+      };
+    }
+    const g = grouped[cId];
+    const remaining = (s.totalAmount || 0) - (s.amountReceived || 0);
+    g.totalAmount += s.totalAmount || 0;
+    g.totalReceived += s.amountReceived || 0;
+    g.totalRemaining += remaining;
+    g.pendingBillsCount++;
+    g.bills.push({
+      _id: s._id,
+      date: s.date,
+      itemId: s.itemId,
+      totalAmount: s.totalAmount,
+      amountReceived: s.amountReceived || 0,
+      dueDate: s.dueDate,
+      paymentStatus: s.paymentStatus,
+      truckNumber: s.truckNumber,
+    });
+  }
+
+  const data = Object.values(grouped).sort((a, b) => b.totalRemaining - a.totalRemaining);
+  res.json({ success: true, data });
 };

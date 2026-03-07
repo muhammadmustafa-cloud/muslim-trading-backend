@@ -12,6 +12,12 @@ const stockEntrySchema = new mongoose.Schema(
     supplierWeight: { type: Number, default: 0, min: 0 },
     amount: { type: Number, default: 0, min: 0 },
     amountPaid: { type: Number, default: 0 },
+    dueDate: { type: Date, default: null },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'partial', 'paid'],
+      default: 'pending',
+    },
     truckNumber: { type: String, trim: true, default: '' },
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     notes: { type: String, trim: true, default: '' },

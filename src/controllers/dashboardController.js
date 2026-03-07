@@ -20,7 +20,7 @@ export const getSummary = async (req, res) => {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
-  const [customersCount, suppliersCount, mazdoorCount, accounts, todaySalesResult, stockData, totalPurchaseResult, totalSalesResult] = await Promise.all([
+  const [customersCount, suppliersCount, mazdoorCount, accounts, todaySalesResult, stockData, totalPurchaseResult, totalSalesResult, pendingPaymentsResult] = await Promise.all([
     Customer.countDocuments(),
     Supplier.countDocuments(),
     Mazdoor.countDocuments(),
@@ -32,6 +32,10 @@ export const getSummary = async (req, res) => {
     getCurrentStockData(),
     StockEntry.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
     Sale.aggregate([{ $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
+    StockEntry.aggregate([
+      { $match: { paymentStatus: { $ne: 'paid' } } },
+      { $group: { _id: null, count: { $sum: 1 }, totalPending: { $sum: { $subtract: ['$amount', '$amountPaid'] } } } },
+    ]),
   ]);
 
   let totalBalance = 0;
@@ -44,6 +48,7 @@ export const getSummary = async (req, res) => {
   const totalPurchaseCost = totalPurchaseResult[0]?.total ?? 0;
   const totalSalesRevenue = totalSalesResult[0]?.total ?? 0;
   const overallProfit = totalSalesRevenue - totalPurchaseCost;
+  const pendingPayments = pendingPaymentsResult[0] || { count: 0, totalPending: 0 };
 
   const stockSummary = stockData.map((row) => ({
     ...row,
@@ -61,6 +66,10 @@ export const getSummary = async (req, res) => {
         totalPurchaseCost,
         totalSalesRevenue,
         overallProfit,
+      },
+      pendingPayments: {
+        count: pendingPayments.count,
+        totalAmount: pendingPayments.totalPending,
       },
       stockSummary,
       ...(useLowStock && { lowStockCount }),

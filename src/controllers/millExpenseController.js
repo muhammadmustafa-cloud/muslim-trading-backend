@@ -20,7 +20,7 @@ async function getOrCreateMillAccount() {
 }
 
 export const list = async (req, res) => {
-  const { dateFrom, dateTo } = req.query;
+  const { dateFrom, dateTo, page = 1, limit = 10 } = req.query;
   const filter = {};
   if (dateFrom || dateTo) {
     filter.date = {};
@@ -31,8 +31,21 @@ export const list = async (req, res) => {
       filter.date.$lte = d;
     }
   }
-  const expenses = await MillExpense.find(filter).sort({ date: -1 }).lean();
-  const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  const pageNum = parseInt(page, 10);
+  const limitNum = parseInt(limit, 10);
+  const skip = (pageNum - 1) * limitNum;
+
+  const totalDocs = await MillExpense.countDocuments(filter);
+  const expenses = await MillExpense.find(filter)
+    .sort({ date: -1, createdAt: -1 })
+    .skip(skip)
+    .limit(limitNum)
+    .lean();
+
+  const allExpensesForTotal = await MillExpense.find(filter).lean();
+  const total = allExpensesForTotal.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
   const account = await getOrCreateMillAccount();
   const flow = await getAccountBalance(account._id);
   const currentBalance = (account.openingBalance ?? 0) + flow;
@@ -40,6 +53,12 @@ export const list = async (req, res) => {
   res.json({
     success: true,
     data: expenses,
+    pagination: {
+      total: totalDocs,
+      page: pageNum,
+      pages: Math.ceil(totalDocs / limitNum),
+      limit: limitNum,
+    },
     summary: { total, accountBalance: currentBalance },
     account: { _id: account._id, name: account.name },
   });

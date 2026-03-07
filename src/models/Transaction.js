@@ -11,6 +11,8 @@ const transactionSchema = new mongoose.Schema(
     note: { type: String, trim: true, default: '' },
     supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
     mazdoorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Mazdoor', default: null },
+    stockEntryId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockEntry', default: null },
+    saleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', default: null },
   },
   { timestamps: true }
 );

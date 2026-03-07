@@ -8,17 +8,18 @@ import mongoose from 'mongoose';
  */
 export async function getCurrentStockData() {
   const entries = await StockEntry.find({}).lean();
-  const byItem = new Map(); // key: itemId.toString() -> { itemId, quantity }
+  const byItem = new Map(); // key: itemId.toString() -> { itemId, quantity, kattay }
 
   for (const entry of entries) {
     if (!entry.itemId) continue;
     const itemId = entry.itemId && typeof entry.itemId === 'object' && entry.itemId._id ? entry.itemId._id : entry.itemId;
     const key = itemId.toString();
     if (!byItem.has(key)) {
-      byItem.set(key, { itemId, quantity: 0 });
+      byItem.set(key, { itemId, quantity: 0, kattay: 0 });
     }
     const rec = byItem.get(key);
     rec.quantity += Number(entry.receivedWeight) || 0;
+    rec.kattay += Number(entry.kattay) || 0;
   }
 
   const sales = await Sale.find({}).lean();
@@ -27,9 +28,11 @@ export async function getCurrentStockData() {
     const itemId = (s.itemId && (s.itemId._id || s.itemId)) ? (s.itemId._id || s.itemId) : s.itemId;
     const key = itemId.toString();
     if (!byItem.has(key)) {
-      byItem.set(key, { itemId, quantity: 0 });
+      byItem.set(key, { itemId, quantity: 0, kattay: 0 });
     }
-    byItem.get(key).quantity -= Number(s.quantity) || 0;
+    const saleRec = byItem.get(key);
+    saleRec.quantity -= Number(s.quantity) || 0;
+    saleRec.kattay -= Number(s.kattay) || 0;
   }
 
   const items = await Item.find({}).populate('categoryId', 'name').lean();
@@ -45,6 +48,7 @@ export async function getCurrentStockData() {
       category: item.categoryId?.name || '',
       quality: item.quality || '',
       quantity: Math.max(0, rec.quantity),
+      kattay: Math.max(0, rec.kattay),
     });
   }
 

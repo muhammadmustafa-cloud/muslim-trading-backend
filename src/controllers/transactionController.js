@@ -58,6 +58,8 @@ export const list = async (req, res) => {
           .populate('toAccountId', 'name')
           .populate('supplierId', 'name')
           .populate('mazdoorId', 'name')
+          .populate('stockEntryId')
+          .populate('saleId')
           .sort({ date: -1 })
           .lean();
       })(),
@@ -96,6 +98,8 @@ export const list = async (req, res) => {
         note: t.note || '',
         source: 'transaction',
         referenceId: t._id,
+        stockEntryId: t.stockEntryId,
+        saleId: t.saleId,
       });
     });
     sales.forEach((s) => {
@@ -161,6 +165,8 @@ export const list = async (req, res) => {
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
     .populate('mazdoorId', 'name')
+    .populate('stockEntryId')
+    .populate('saleId')
     .sort({ date: -1 })
     .lean();
   res.json({ success: true, data: transactions });
