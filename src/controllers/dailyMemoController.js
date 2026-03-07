@@ -1,7 +1,8 @@
 import Sale from '../models/Sale.js';
 import StockEntry from '../models/StockEntry.js';
 import Transaction from '../models/Transaction.js';
-import mongoose from 'mongoose';
+import MillExpense from '../models/MillExpense.js';
+import MazdoorExpense from '../models/MazdoorExpense.js';
 
 /**
  * Build date filter for a single day or range.
@@ -22,45 +23,30 @@ function dateFilter(dateFrom, dateTo) {
 
 /**
  * GET /api/daily-memo
- * Returns unified daily cash memo: sales, stock entries, transactions (deposit/withdraw/transfer).
- * Query: dateFrom, dateTo (default today), accountId, customerId, supplierId, mazdoorId, itemId (khata).
+ * Universal Daily Ledger — aggregates ALL financial activity across the system.
+ * Sources: Sales, Purchases (StockEntry), Transactions, Mill Expenses, Mazdoor Expenses.
+ * Query: dateFrom, dateTo (default today).
+ * Skips auto-generated transactions (those linked to stockEntryId or saleId) to avoid double-counting.
  */
 export const getDailyMemo = async (req, res) => {
-  const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId, itemId } = req.query;
+  const { dateFrom, dateTo } = req.query;
 
   const today = new Date().toISOString().slice(0, 10);
   const from = dateFrom || today;
   const to = dateTo || today;
   const df = dateFilter(from, to);
 
-  const salesMatch = { ...df };
-  if (accountId) salesMatch.accountId = new mongoose.Types.ObjectId(accountId);
-  if (customerId) salesMatch.customerId = new mongoose.Types.ObjectId(customerId);
-  if (itemId) salesMatch.itemId = new mongoose.Types.ObjectId(itemId);
+  // Transactions: skip auto-generated ones (linked to a sale or purchase)
+  const txMatch = { ...df, stockEntryId: null, saleId: null };
 
-  const stockMatch = { ...df };
-  if (accountId) stockMatch.accountId = new mongoose.Types.ObjectId(accountId);
-  if (supplierId) stockMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
-  if (itemId) stockMatch.itemId = new mongoose.Types.ObjectId(itemId);
-
-  const txMatch = { ...df };
-  if (accountId) {
-    txMatch.$or = [
-      { fromAccountId: new mongoose.Types.ObjectId(accountId) },
-      { toAccountId: new mongoose.Types.ObjectId(accountId) },
-    ];
-  }
-  if (supplierId) txMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
-  if (mazdoorId) txMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
-
-  const [sales, stockEntries, transactions] = await Promise.all([
-    Sale.find(salesMatch)
+  const [sales, stockEntries, transactions, millExpenses, mazdoorExpenses] = await Promise.all([
+    Sale.find(df)
       .populate('customerId', 'name')
       .populate('accountId', 'name')
       .populate('itemId', 'name')
       .sort({ date: 1 })
       .lean(),
-    StockEntry.find(stockMatch)
+    StockEntry.find(df)
       .populate('supplierId', 'name')
       .populate('accountId', 'name')
       .populate('itemId', 'name')
@@ -73,48 +59,52 @@ export const getDailyMemo = async (req, res) => {
       .populate('mazdoorId', 'name')
       .sort({ date: 1 })
       .lean(),
+    MillExpense.find(df)
+      .sort({ date: 1 })
+      .lean(),
+    MazdoorExpense.find(df)
+      .populate('mazdoorId', 'name')
+      .populate('mazdoorItemId', 'name')
+      .populate('accountId', 'name')
+      .sort({ date: 1 })
+      .lean(),
   ]);
 
   const rows = [];
 
+  // --- Sales (Credit / In) ---
   sales.forEach((s) => {
+    const received = Number(s.amountReceived) || 0;
+    if (received <= 0) return; // skip zero-amount sales
     rows.push({
       type: 'sale',
+      source: 'sale',
       date: s.date,
-      description: `Sale — ${(s.customerId && s.customerId.name) || '—'}`,
-      amount: Number(s.amountReceived) || 0,
+      description: `Sale — ${s.customerId?.name || '—'} — ${s.itemId?.name || ''}`,
+      amount: received,
       amountType: 'in',
-      accountId: s.accountId?._id || s.accountId,
-      accountName: s.accountId?.name || '—',
-      customerId: s.customerId?._id || s.customerId,
-      customerName: s.customerId?.name || '—',
-      itemId: s.itemId?._id || s.itemId,
-      itemName: s.itemId?.name || '—',
       referenceId: s._id,
-      category: '',
       note: s.notes || '',
     });
   });
 
+  // --- Purchases / Stock Entries (Debit / Out) ---
   stockEntries.forEach((e) => {
+    const paid = Number(e.amountPaid) || 0;
+    if (paid <= 0) return;
     rows.push({
-      type: 'stock_entry',
+      type: 'purchase',
+      source: 'purchase',
       date: e.date,
-      description: `Purchase — ${(e.supplierId && e.supplierId.name) || '—'}`,
-      amount: Number(e.amountPaid) || Number(e.amount) || 0,
+      description: `Purchase — ${e.supplierId?.name || '—'} — ${e.itemId?.name || ''}`,
+      amount: paid,
       amountType: 'out',
-      accountId: e.accountId?._id || e.accountId,
-      accountName: e.accountId?.name || '—',
-      supplierId: e.supplierId?._id || e.supplierId,
-      supplierName: e.supplierId?.name || '—',
-      itemId: e.itemId?._id || e.itemId,
-      itemName: e.itemId?.name || '—',
       referenceId: e._id,
-      category: 'purchase',
       note: e.notes || '',
     });
   });
 
+  // --- Manual Transactions (Deposit / Withdraw / Transfer) ---
   transactions.forEach((t) => {
     const type = t.type;
     const category = t.category || '';
@@ -129,73 +119,83 @@ export const getDailyMemo = async (req, res) => {
     if (type === 'deposit') {
       rows.push({
         type: 'deposit',
+        source: 'transaction',
         date: t.date,
         description: desc,
         amount: Number(t.amount) || 0,
         amountType: 'in',
-        accountId: t.toAccountId?._id || t.toAccountId,
-        accountName: t.toAccountId?.name || '—',
-        toAccountId: null,
-        toAccountName: null,
-        mazdoorId: t.mazdoorId?._id || t.mazdoorId,
-        mazdoorName: t.mazdoorId?.name || '—',
-        supplierId: t.supplierId?._id || t.supplierId,
-        supplierName: t.supplierId?.name || '—',
         referenceId: t._id,
-        category,
         note: t.note || '',
       });
     } else if (type === 'withdraw') {
       rows.push({
         type: 'withdraw',
+        source: 'transaction',
         date: t.date,
         description: desc,
         amount: Number(t.amount) || 0,
         amountType: 'out',
-        accountId: t.fromAccountId?._id || t.fromAccountId,
-        accountName: t.fromAccountId?.name || '—',
-        toAccountId: null,
-        toAccountName: null,
-        mazdoorId: t.mazdoorId?._id || t.mazdoorId,
-        mazdoorName: t.mazdoorId?.name || '—',
-        supplierId: t.supplierId?._id || t.supplierId,
-        supplierName: t.supplierId?.name || '—',
         referenceId: t._id,
-        category,
         note: t.note || '',
       });
     } else {
+      // Transfer creates two rows: out from source, in to destination
       rows.push({
         type: 'transfer',
+        source: 'transaction',
         date: t.date,
         description: `Transfer → ${t.toAccountId?.name || '—'}`,
         amount: Number(t.amount) || 0,
         amountType: 'out',
-        accountId: t.fromAccountId?._id || t.fromAccountId,
-        accountName: t.fromAccountId?.name || '—',
-        toAccountId: t.toAccountId?._id || t.toAccountId,
-        toAccountName: t.toAccountId?.name || '—',
         referenceId: t._id,
-        category: '',
         note: t.note || '',
       });
       rows.push({
         type: 'transfer',
+        source: 'transaction',
         date: t.date,
         description: `Transfer ← ${t.fromAccountId?.name || '—'}`,
         amount: Number(t.amount) || 0,
         amountType: 'in',
-        accountId: t.toAccountId?._id || t.toAccountId,
-        accountName: t.toAccountId?.name || '—',
-        toAccountId: t.fromAccountId?._id || t.fromAccountId,
-        toAccountName: t.fromAccountId?.name || '—',
         referenceId: t._id,
-        category: '',
         note: t.note || '',
       });
     }
   });
 
+  // --- Mill Expenses (Debit / Out) ---
+  millExpenses.forEach((m) => {
+    const amt = Number(m.amount) || 0;
+    if (amt <= 0) return;
+    rows.push({
+      type: 'mill_expense',
+      source: 'mill_expense',
+      date: m.date,
+      description: `Mill Expense${m.category ? ` — ${m.category}` : ''}${m.note ? ` — ${m.note.slice(0, 30)}` : ''}`,
+      amount: amt,
+      amountType: 'out',
+      referenceId: m._id,
+      note: m.note || '',
+    });
+  });
+
+  // --- Mazdoor Expenses (Debit / Out) ---
+  mazdoorExpenses.forEach((me) => {
+    const amt = Number(me.totalAmount) || 0;
+    if (amt <= 0) return;
+    rows.push({
+      type: 'mazdoor_expense',
+      source: 'mazdoor_expense',
+      date: me.date,
+      description: `Mazdoor — ${me.mazdoorId?.name || '—'}${me.mazdoorItemId?.name ? ` (${me.mazdoorItemId.name})` : ''}`,
+      amount: amt,
+      amountType: 'out',
+      referenceId: me._id,
+      note: '',
+    });
+  });
+
+  // Sort all rows by date
   rows.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const totalIn = rows.filter((r) => r.amountType === 'in').reduce((s, r) => s + (Number(r.amount) || 0), 0);
