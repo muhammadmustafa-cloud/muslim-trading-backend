@@ -7,18 +7,24 @@ async function getAvailableQuantity(itemId, excludeSaleId = null) {
   const itemObjId = new mongoose.Types.ObjectId(itemId);
   const inResult = await StockEntry.aggregate([
     { $match: { itemId: itemObjId } },
-    { $group: { _id: null, total: { $sum: '$receivedWeight' } } },
+    { $group: { _id: null, totalQty: { $sum: '$receivedWeight' }, totalKattay: { $sum: '$kattay' } } },
   ]);
-  const stockIn = inResult[0]?.total ?? 0;
+  const stockInQty = inResult[0]?.totalQty ?? 0;
+  const stockInKattay = inResult[0]?.totalKattay ?? 0;
 
   const saleMatch = { itemId: itemObjId };
   if (excludeSaleId) saleMatch._id = { $ne: new mongoose.Types.ObjectId(excludeSaleId) };
   const outResult = await Sale.aggregate([
     { $match: saleMatch },
-    { $group: { _id: null, total: { $sum: '$quantity' } } },
+    { $group: { _id: null, totalQty: { $sum: '$quantity' }, totalKattay: { $sum: '$kattay' } } },
   ]);
-  const stockOut = outResult[0]?.total ?? 0;
-  return Math.max(0, stockIn - stockOut);
+  const stockOutQty = outResult[0]?.totalQty ?? 0;
+  const stockOutKattay = outResult[0]?.totalKattay ?? 0;
+
+  return {
+    availableQty: Math.max(0, stockInQty - stockOutQty),
+    availableKattay: Math.max(0, stockInKattay - stockOutKattay),
+  };
 }
 
 export const getAvailable = async (req, res) => {
@@ -26,8 +32,8 @@ export const getAvailable = async (req, res) => {
   if (!itemId) {
     return res.status(400).json({ success: false, message: 'itemId required' });
   }
-  const available = await getAvailableQuantity(itemId, excludeSaleId || null);
-  res.json({ success: true, data: { available } });
+  const { availableQty, availableKattay } = await getAvailableQuantity(itemId, excludeSaleId || null);
+  res.json({ success: true, data: { available: availableQty, availableWeight: availableQty, availableKattay } });
 };
 
 export const list = async (req, res) => {
@@ -81,7 +87,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, bardanaAmount, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
   if (!customerId || !itemId) {
     return res.status(400).json({ success: false, message: 'customerId and itemId are required' });
   }
@@ -94,20 +100,24 @@ export const create = async (req, res) => {
   const computedQty = k > 0 && kpk > 0 ? k * kpk : (Number(quantity) || 0);
   if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
 
-  const available = await getAvailableQuantity(itemId);
-  if (computedQty > available) {
-    return res.status(400).json({ success: false, message: `Stock kam he. Is item ki available quantity: ${available}. Jo quantity bech rahe ho wo yahan se cut hoti he, zyada enter mat karo.` });
+  const { availableQty, availableKattay } = await getAvailableQuantity(itemId);
+  if (computedQty > availableQty) {
+    return res.status(400).json({ success: false, message: `Stock kam he (Weight). Available: ${availableQty}kg. Aap enter kar rahe hain: ${computedQty}kg.` });
+  }
+  if (k > availableKattay) {
+    return res.status(400).json({ success: false, message: `Stock kam he (Kattay). Available: ${availableKattay} bags. Aap enter kar rahe hain: ${k} bags.` });
   }
 
   // Auto-calculate totalAmount: kattay × ratePerKata, or quantity × rate, or manual
   const r = Number(rate) || 0;
+  const bardana = Number(bardanaAmount) || 0;
   let computedTotal;
   if (k > 0 && rpk > 0) {
-    computedTotal = Math.round(k * rpk);
+    computedTotal = Math.round(k * rpk) + bardana;
   } else if (computedQty > 0 && r > 0) {
-    computedTotal = Math.round(computedQty * r);
+    computedTotal = Math.round(computedQty * r) + bardana;
   } else {
-    computedTotal = Number(totalAmount) || 0;
+    computedTotal = (Number(totalAmount) || 0) + bardana;
   }
 
   const received = Number(amountReceived) || 0;
@@ -125,6 +135,7 @@ export const create = async (req, res) => {
     kgPerKata: kpk,
     ratePerKata: rpk,
     quantity: computedQty,
+    bardanaAmount: bardana,
     rate: r,
     totalAmount: computedTotal,
     truckNumber: (truckNumber || '').trim(),
@@ -149,7 +160,7 @@ export const update = async (req, res) => {
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, bardanaAmount, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
   const newItemId = itemId ? new mongoose.Types.ObjectId(itemId) : sale.itemId;
 
   // Calculate new kattay-based values
@@ -166,20 +177,24 @@ export const update = async (req, res) => {
   }
   if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
 
-  const available = await getAvailableQuantity(newItemId, sale._id);
-  if (newQty > available) {
-    return res.status(400).json({ success: false, message: `Stock kam he. Is item ki available quantity: ${available}. Jo quantity bech rahe ho wo stock se cut hoti he.` });
+  const { availableQty, availableKattay } = await getAvailableQuantity(newItemId, sale._id);
+  if (newQty > availableQty) {
+    return res.status(400).json({ success: false, message: `Stock kam he (Weight). Available: ${availableQty}kg. Aap enter kar rahe hain: ${newQty}kg.` });
+  }
+  if (k > availableKattay) {
+    return res.status(400).json({ success: false, message: `Stock kam he (Kattay). Available: ${availableKattay} bags. Aap enter kar rahe hain: ${k} bags.` });
   }
 
   // Auto-calculate totalAmount
   const newRate = rate != null ? Number(rate) || 0 : sale.rate;
+  const bardana = bardanaAmount != null ? Number(bardanaAmount) : sale.bardanaAmount;
   let computedTotal;
   if (k > 0 && rpk > 0) {
-    computedTotal = Math.round(k * rpk);
+    computedTotal = Math.round(k * rpk) + bardana;
   } else if (newQty > 0 && newRate > 0) {
-    computedTotal = Math.round(newQty * newRate);
+    computedTotal = Math.round(newQty * newRate) + bardana;
   } else {
-    computedTotal = totalAmount != null ? Number(totalAmount) : sale.totalAmount;
+    computedTotal = (totalAmount != null ? Number(totalAmount) : sale.totalAmount) + bardana;
   }
 
   const received = amountReceived != null ? Number(amountReceived) : sale.amountReceived;
@@ -196,6 +211,7 @@ export const update = async (req, res) => {
   sale.kgPerKata = kpk;
   sale.ratePerKata = rpk;
   sale.quantity = newQty;
+  sale.bardanaAmount = bardana;
   sale.rate = newRate;
   sale.totalAmount = computedTotal;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();

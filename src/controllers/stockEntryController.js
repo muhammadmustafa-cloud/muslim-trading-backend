@@ -53,7 +53,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, amountPaid, dueDate, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, bardanaAmount, amountPaid, dueDate, truckNumber, accountId, notes } = req.body;
   if (!itemId || !supplierId) {
     return res.status(400).json({ success: false, message: 'itemId and supplierId are required' });
   }
@@ -65,6 +65,7 @@ export const create = async (req, res) => {
   const computedWeight = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : 0);
 
   const amt = amount != null ? Number(amount) : 0;
+  const bardana = bardanaAmount != null ? Number(bardanaAmount) : 0;
   const paid = amountPaid != null ? Number(amountPaid) : 0;
   let status = 'pending';
   if (paid >= amt && amt > 0) status = 'paid';
@@ -80,6 +81,7 @@ export const create = async (req, res) => {
     millWeight: millWeight != null ? Number(millWeight) : 0,
     supplierWeight: supplierWeight != null ? Number(supplierWeight) : 0,
     amount: amt,
+    bardanaAmount: bardana,
     amountPaid: paid,
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus: status,
@@ -101,7 +103,7 @@ export const update = async (req, res) => {
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, amountPaid, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, bardanaAmount, amountPaid, truckNumber, accountId, notes } = req.body;
   if (date != null) entry.date = new Date(date);
   if (itemId != null) entry.itemId = itemId;
   if (supplierId != null) entry.supplierId = supplierId;
@@ -115,6 +117,7 @@ export const update = async (req, res) => {
   if (millWeight != null) entry.millWeight = Number(millWeight) || 0;
   if (supplierWeight != null) entry.supplierWeight = Number(supplierWeight) || 0;
   if (amount != null) entry.amount = Number(amount);
+  if (bardanaAmount != null) entry.bardanaAmount = Number(bardanaAmount);
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
   if (req.body.dueDate !== undefined) entry.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
 

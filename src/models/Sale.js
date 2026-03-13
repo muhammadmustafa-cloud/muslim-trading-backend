@@ -12,6 +12,7 @@ const saleSchema = new mongoose.Schema(
     ratePerKata: { type: Number, default: 0 },
 
     quantity: { type: Number, required: true, min: 0 },       // Total weight (kg) = kattay × kgPerKata
+    bardanaAmount: { type: Number, default: 0, min: 0 },
     rate: { type: Number, default: 0 },                        // Rate per kg (legacy/fallback)
     totalAmount: { type: Number, default: 0 },                 // Total bill = kattay × ratePerKata OR quantity × rate
     truckNumber: { type: String, trim: true, default: '' },

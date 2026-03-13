@@ -11,6 +11,7 @@ const stockEntrySchema = new mongoose.Schema(
     millWeight: { type: Number, default: 0, min: 0 },
     supplierWeight: { type: Number, default: 0, min: 0 },
     amount: { type: Number, default: 0, min: 0 },
+    bardanaAmount: { type: Number, default: 0, min: 0 },
     amountPaid: { type: Number, default: 0 },
     dueDate: { type: Date, default: null },
     paymentStatus: {
