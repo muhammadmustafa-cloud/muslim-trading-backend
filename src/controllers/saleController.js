@@ -87,18 +87,21 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, bardanaAmount, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
   if (!customerId || !itemId) {
     return res.status(400).json({ success: false, message: 'customerId and itemId are required' });
   }
 
   const k = Number(kattay) || 0;
   const kpk = Number(kgPerKata) || 0;
-  const rpk = Number(ratePerKata) || 0;
+  // Use provided shCut or calculate based on Standard Rule: 0.1kg per bag
+  const sCut = shCut != null && Number(shCut) > 0 ? Number(shCut) : Number((k * 0.1).toFixed(2));
 
-  // Auto-calculate quantity (total weight) from kattay × kgPerKata, or use direct quantity
-  const computedQty = k > 0 && kpk > 0 ? k * kpk : (Number(quantity) || 0);
-  if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
+  // Auto-calculate quantity (total weight) from kattay × kgPerKata, then subtract shCut
+  let computedQty = k > 0 && kpk > 0 ? k * kpk : (Number(quantity) || 0);
+  computedQty = Math.max(0, computedQty - sCut); // Ensure it doesn't go below 0
+  
+  if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
 
   const { availableQty, availableKattay } = await getAvailableQuantity(itemId);
   if (computedQty > availableQty) {
@@ -108,16 +111,21 @@ export const create = async (req, res) => {
     return res.status(400).json({ success: false, message: `Stock kam he (Kattay). Available: ${availableKattay} bags. Aap enter kar rahe hain: ${k} bags.` });
   }
 
-  // Auto-calculate totalAmount: kattay × ratePerKata, or quantity × rate, or manual
+  const bRate = Number(bardanaRate) || 0;
+  // Auto-calculate bardanaAmount: kattay × bardanaRate OR use manual bardanaAmount
+  const bardana = bRate > 0 && k > 0 ? (k * bRate) : (Number(bardanaAmount) || 0);
+  
+  const mazdoriAmt = Number(mazdori) || 0;
   const r = Number(rate) || 0;
-  const bardana = Number(bardanaAmount) || 0;
+
+  // Auto-calculate totalAmount: 
+  // (Quantity / 40) × rate (since rate is per MUN based on user feedback)
   let computedTotal;
-  if (k > 0 && rpk > 0) {
-    computedTotal = Math.round(k * rpk) + bardana;
-  } else if (computedQty > 0 && r > 0) {
-    computedTotal = Math.round(computedQty * r) + bardana;
+  if (computedQty > 0 && r > 0) {
+    const mun = computedQty / 40;
+    computedTotal = Math.round(mun * r) + bardana + mazdoriAmt;
   } else {
-    computedTotal = (Number(totalAmount) || 0) + bardana;
+    computedTotal = (Number(totalAmount) || 0) + bardana + mazdoriAmt;
   }
 
   const received = Number(amountReceived) || 0;
@@ -133,9 +141,11 @@ export const create = async (req, res) => {
     itemId,
     kattay: k,
     kgPerKata: kpk,
-    ratePerKata: rpk,
     quantity: computedQty,
+    shCut: sCut,
+    bardanaRate: bRate,
     bardanaAmount: bardana,
+    mazdori: mazdoriAmt,
     rate: r,
     totalAmount: computedTotal,
     truckNumber: (truckNumber || '').trim(),
@@ -160,13 +170,21 @@ export const update = async (req, res) => {
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, rate, bardanaAmount, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
   const newItemId = itemId ? new mongoose.Types.ObjectId(itemId) : sale.itemId;
 
   // Calculate new kattay-based values
   const k = kattay != null ? Number(kattay) : sale.kattay;
   const kpk = kgPerKata != null ? Number(kgPerKata) : sale.kgPerKata;
-  const rpk = ratePerKata != null ? Number(ratePerKata) : sale.ratePerKata;
+  // Update shCut: if kattay changed and shCut wasn't explicitly sent, recalculate.
+  let sCut;
+  if (shCut != null) {
+    sCut = Number(shCut);
+  } else if (kattay != null) {
+    sCut = Number((k * 0.1).toFixed(2));
+  } else {
+    sCut = sale.shCut || 0;
+  }
 
   // Auto-calculate quantity
   let newQty;
@@ -175,7 +193,8 @@ export const update = async (req, res) => {
   } else {
     newQty = quantity != null ? Number(quantity) : sale.quantity;
   }
-  if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
+  newQty = Math.max(0, newQty - sCut); // Deduct SH.CUT
+  if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
 
   const { availableQty, availableKattay } = await getAvailableQuantity(newItemId, sale._id);
   if (newQty > availableQty) {
@@ -187,14 +206,16 @@ export const update = async (req, res) => {
 
   // Auto-calculate totalAmount
   const newRate = rate != null ? Number(rate) || 0 : sale.rate;
-  const bardana = bardanaAmount != null ? Number(bardanaAmount) : sale.bardanaAmount;
+  const bRate = bardanaRate != null ? Number(bardanaRate) : (sale.bardanaRate || 0);
+  const bardana = bRate > 0 && k > 0 ? (k * bRate) : (bardanaAmount != null ? Number(bardanaAmount) : sale.bardanaAmount);
+  const mazdoriAmt = mazdori != null ? Number(mazdori) : (sale.mazdori || 0);
+
   let computedTotal;
-  if (k > 0 && rpk > 0) {
-    computedTotal = Math.round(k * rpk) + bardana;
-  } else if (newQty > 0 && newRate > 0) {
-    computedTotal = Math.round(newQty * newRate) + bardana;
+  if (newQty > 0 && newRate > 0) {
+    const mun = newQty / 40;
+    computedTotal = Math.round(mun * newRate) + bardana + mazdoriAmt;
   } else {
-    computedTotal = (totalAmount != null ? Number(totalAmount) : sale.totalAmount) + bardana;
+    computedTotal = (totalAmount != null ? Number(totalAmount) : sale.totalAmount) + bardana + mazdoriAmt;
   }
 
   const received = amountReceived != null ? Number(amountReceived) : sale.amountReceived;
@@ -209,9 +230,11 @@ export const update = async (req, res) => {
   if (itemId != null) sale.itemId = newItemId;
   sale.kattay = k;
   sale.kgPerKata = kpk;
-  sale.ratePerKata = rpk;
   sale.quantity = newQty;
+  sale.shCut = sCut;
+  sale.bardanaRate = bRate;
   sale.bardanaAmount = bardana;
+  sale.mazdori = mazdoriAmt;
   sale.rate = newRate;
   sale.totalAmount = computedTotal;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
