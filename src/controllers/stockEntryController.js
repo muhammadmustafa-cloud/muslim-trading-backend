@@ -53,7 +53,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, bardanaAmount, amountPaid, dueDate, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, dueDate, truckNumber, accountId, notes } = req.body;
   if (!itemId || !supplierId) {
     return res.status(400).json({ success: false, message: 'itemId and supplierId are required' });
   }
@@ -62,10 +62,23 @@ export const create = async (req, res) => {
 
   const k = Number(kattay) || 0;
   const kg = Number(kgPerKata) || 0;
-  const computedWeight = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : 0);
+  const grossWeight = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : 0);
+  
+  // Standard Rule for Purchase: 250g (0.25kg) cut per 40kg (1 MUN)
+  const sCut = shCut != null && Number(shCut) > 0 ? Number(shCut) : Number(((grossWeight / 40) * 0.25).toFixed(2));
+  const computedWeight = Math.max(0, grossWeight - sCut);
 
-  const amt = amount != null ? Number(amount) : 0;
+  const r = Number(rate) || 0;
   const bardana = bardanaAmount != null ? Number(bardanaAmount) : 0;
+  
+  // Professional MUN Based Calculation: (NetWeight / 40) * Rate + Bardana
+  let amt = 0;
+  if (computedWeight > 0 && r > 0) {
+    amt = Math.round((computedWeight / 40) * r) + bardana;
+  } else {
+    amt = amount != null ? Number(amount) : 0;
+  }
+
   const paid = amountPaid != null ? Number(amountPaid) : 0;
   let status = 'pending';
   if (paid >= amt && amt > 0) status = 'paid';
@@ -76,10 +89,12 @@ export const create = async (req, res) => {
     itemId,
     supplierId,
     receivedWeight: computedWeight,
+    shCut: sCut,
     kattay: k,
     kgPerKata: kg,
     millWeight: millWeight != null ? Number(millWeight) : 0,
     supplierWeight: supplierWeight != null ? Number(supplierWeight) : 0,
+    rate: r,
     amount: amt,
     bardanaAmount: bardana,
     amountPaid: paid,
@@ -103,21 +118,44 @@ export const update = async (req, res) => {
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, amount, bardanaAmount, amountPaid, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, truckNumber, accountId, notes } = req.body;
   if (date != null) entry.date = new Date(date);
   if (itemId != null) entry.itemId = itemId;
   if (supplierId != null) entry.supplierId = supplierId;
   if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
   const k = kattay != null ? Number(kattay) || 0 : entry.kattay;
   const kg = kgPerKata != null ? Number(kgPerKata) || 0 : entry.kgPerKata;
-  if (k > 0 && kg > 0) entry.receivedWeight = k * kg;
-  else if (receivedWeight != null) entry.receivedWeight = Number(receivedWeight);
+  const gross = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : (entry.receivedWeight + (entry.shCut || 0)));
+  
+  let sCut;
+  if (shCut != null) {
+      sCut = Number(shCut);
+  } else if (kattay != null || kgPerKata != null) {
+      sCut = Number(((gross / 40) * 0.25).toFixed(2));
+  } else {
+      sCut = entry.shCut || 0;
+  }
+  
+  entry.shCut = sCut;
+  entry.receivedWeight = Math.max(0, gross - sCut);
+  
   if (kattay != null) entry.kattay = k;
   if (kgPerKata != null) entry.kgPerKata = kg;
   if (millWeight != null) entry.millWeight = Number(millWeight) || 0;
   if (supplierWeight != null) entry.supplierWeight = Number(supplierWeight) || 0;
-  if (amount != null) entry.amount = Number(amount);
-  if (bardanaAmount != null) entry.bardanaAmount = Number(bardanaAmount);
+  
+  const r = rate != null ? Number(rate) : entry.rate;
+  if (rate != null) entry.rate = r;
+  
+  const bardana = bardanaAmount != null ? Number(bardanaAmount) : entry.bardanaAmount;
+  if (bardanaAmount != null) entry.bardanaAmount = bardana;
+  
+  if (amount != null) {
+    entry.amount = Number(amount);
+  } else if (rate != null || kattay != null || kgPerKata != null || bardanaAmount != null) {
+    entry.amount = Math.round((entry.receivedWeight / 40) * r) + bardana;
+  }
+  
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
   if (req.body.dueDate !== undefined) entry.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
 

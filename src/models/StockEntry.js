@@ -10,6 +10,8 @@ const stockEntrySchema = new mongoose.Schema(
     kgPerKata: { type: Number, default: 0, min: 0 },
     millWeight: { type: Number, default: 0, min: 0 },
     supplierWeight: { type: Number, default: 0, min: 0 },
+    rate: { type: Number, default: 0 }, // Rate per MUN (40kg)
+    shCut: { type: Number, default: 0 }, // Total S.H Cut weight
     amount: { type: Number, default: 0, min: 0 },
     bardanaAmount: { type: Number, default: 0, min: 0 },
     amountPaid: { type: Number, default: 0 },
