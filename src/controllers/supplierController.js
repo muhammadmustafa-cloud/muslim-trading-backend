@@ -19,7 +19,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { name, phone, address, notes, isAlsoCustomer, linkedCustomerId, createLinkedCustomer } = req.body;
+  const { name, phone, address, notes, isAlsoCustomer, linkedCustomerId, createLinkedCustomer, openingBalance } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
