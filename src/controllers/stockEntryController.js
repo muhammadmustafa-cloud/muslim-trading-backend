@@ -204,9 +204,9 @@ export const payEntry = async (req, res) => {
     fromAccountId: accountId,
     amount: Number(amount),
     category: 'Supplier Payment',
-    note: note || `Payment for Bill ${entry.truckNumber ? `(${entry.truckNumber})` : ''} on ${new Date(entry.date).toLocaleDateString()}`,
-    supplierId: entry.supplierId,
-    stockEntryId: entry._id
+    note: (note || '').trim() || `Payment for Stock Entry #${entry._id.toString().slice(-6).toUpperCase()}`,
+    stockEntryId: entry._id,
+    supplierId: entry.supplierId, // Ensure linking for ledger
   });
 
   // 2. Update Stock Entry

@@ -290,6 +290,7 @@ export const collectPayment = async (req, res) => {
     category: 'Sale Collection',
     note: (note || '').trim() || `Payment collected for Sale #${sale._id.toString().slice(-6).toUpperCase()}`,
     saleId: sale._id,
+    customerId: sale.customerId, // Ensure linking for ledger
   });
 
   sale.amountReceived = (sale.amountReceived || 0) + amt;

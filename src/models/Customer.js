@@ -8,6 +8,7 @@ const customerSchema = new mongoose.Schema(
     notes: { type: String, trim: true, default: '' },
     isAlsoSupplier: { type: Boolean, default: false },
     linkedSupplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
+    openingBalance: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
