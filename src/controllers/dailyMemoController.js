@@ -28,186 +28,140 @@ function dateFilter(dateFrom, dateTo) {
  * Query: dateFrom, dateTo (default today).
  * Skips auto-generated transactions (those linked to stockEntryId or saleId) to avoid double-counting.
  */
+/**
+ * GET /api/daily-memo
+ * Universal Daily Ledger — now strictly follows CASH FLOW using the Transaction model.
+ */
 export const getDailyMemo = async (req, res) => {
   const { dateFrom, dateTo } = req.query;
 
-  const today = new Date().toISOString().slice(0, 10);
-  const from = dateFrom || today;
-  const to = dateTo || today;
-  const df = dateFilter(from, to);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const fromStr = dateFrom || todayStr;
+  const toStr = dateTo || todayStr;
 
-  // Transactions: skip auto-generated ones (linked to a sale or purchase)
-  const txMatch = { ...df, stockEntryId: null, saleId: null };
+  const fromDate = new Date(fromStr);
+  const toDate = new Date(toStr);
+  toDate.setHours(23, 59, 59, 999);
 
-  const [sales, stockEntries, transactions, millExpenses, mazdoorExpenses] = await Promise.all([
-    Sale.find(df)
-      .populate('customerId', 'name')
-      .populate('accountId', 'name')
-      .populate('itemId', 'name')
-      .sort({ date: 1 })
-      .lean(),
-    StockEntry.find(df)
-      .populate('supplierId', 'name')
-      .populate('accountId', 'name')
-      .populate('itemId', 'name')
-      .sort({ date: 1 })
-      .lean(),
-    Transaction.find(txMatch)
-      .populate('fromAccountId', 'name')
-      .populate('toAccountId', 'name')
-      .populate('supplierId', 'name')
-      .populate('mazdoorId', 'name')
-      .sort({ date: 1 })
-      .lean(),
-    MillExpense.find(df)
-      .sort({ date: 1 })
-      .lean(),
-    MazdoorExpense.find(df)
-      .populate('mazdoorId', 'name')
-      .populate('mazdoorItemId', 'name')
-      .populate('accountId', 'name')
-      .sort({ date: 1 })
-      .lean(),
+  // 1. Calculate Opening Balance (Net flow before fromDate)
+  // Logic: In (Deposit) - Out (Withdraw) for all time until fromDate
+  const prevTransactions = await Transaction.aggregate([
+    { $match: { date: { $lt: fromDate } } },
+    {
+      $group: {
+        _id: null,
+        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+      }
+    }
   ]);
+
+  const openingBalance = prevTransactions.length > 0 
+    ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) 
+    : 0;
+
+  // 2. Fetch Transactions in the range
+  const transactions = await Transaction.find({ date: { $gte: fromDate, $lte: toDate } })
+    .populate('fromAccountId', 'name')
+    .populate('toAccountId', 'name')
+    .populate('supplierId', 'name')
+    .populate('customerId', 'name')
+    .populate('mazdoorId', 'name')
+    .populate({
+      path: 'saleId',
+      select: 'truckNumber itemId itemName',
+      populate: { path: 'itemId', select: 'name' }
+    })
+    .populate({
+      path: 'stockEntryId',
+      select: 'truckNumber itemId',
+      populate: { path: 'itemId', select: 'name' }
+    })
+    .sort({ date: 1, createdAt: 1 })
+    .lean();
 
   const rows = [];
 
-  // --- Sales (Credit / In) ---
-  sales.forEach((s) => {
-    const received = Number(s.amountReceived) || 0;
-    if (received <= 0) return; // skip zero-amount sales
-    rows.push({
-      type: 'sale',
-      source: 'sale',
-      date: s.date,
-      description: `Sale — ${s.customerId?.name || '—'} — ${s.itemId?.name || ''}`,
-      amount: received,
-      amountType: 'in',
-      referenceId: s._id,
-      note: s.notes || '',
-    });
-  });
-
-  // --- Purchases / Stock Entries (Debit / Out) ---
-  stockEntries.forEach((e) => {
-    const paid = Number(e.amountPaid) || 0;
-    if (paid <= 0) return;
-    rows.push({
-      type: 'purchase',
-      source: 'purchase',
-      date: e.date,
-      description: `Purchase — ${e.supplierId?.name || '—'} — ${e.itemId?.name || ''}`,
-      amount: paid,
-      amountType: 'out',
-      referenceId: e._id,
-      note: e.notes || '',
-    });
-  });
-
-  // --- Manual Transactions (Deposit / Withdraw / Transfer) ---
   transactions.forEach((t) => {
     const type = t.type;
     const category = t.category || '';
-    const mazdoorName = t.mazdoorId?.name || '';
-    const supplierName = t.supplierId?.name || '';
-    let desc = type === 'deposit' ? 'Deposit' : type === 'withdraw' ? 'Withdraw' : 'Transfer';
-    if (category) desc += ` — ${category}`;
-    if (mazdoorName) desc += ` (${mazdoorName})`;
-    if (supplierName) desc += ` (${supplierName})`;
-    if (t.note) desc += ` — ${(t.note || '').slice(0, 40)}`;
+    
+    // Build descriptive name/header
+    let rowName = '';
+    if (t.customerId) rowName = t.customerId.name;
+    else if (t.supplierId) rowName = t.supplierId.name;
+    else if (t.mazdoorId) rowName = t.mazdoorId.name;
+    else if (t.fromAccountId && type === 'withdraw') rowName = t.fromAccountId.name;
+    else if (t.toAccountId && type === 'deposit') rowName = t.toAccountId.name;
+    else rowName = category.replace('_', ' ').toUpperCase();
+
+    // Build richer description
+    let desc = '';
+    if (t.saleId) {
+      desc = `Sale — ${t.saleId.itemId?.name || t.saleId.itemName || 'Item'}`;
+      if (t.saleId.truckNumber) desc += ` (${t.saleId.truckNumber})`;
+    } else if (t.stockEntryId) {
+      desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'}`;
+      if (t.stockEntryId.truckNumber) desc += ` (${t.stockEntryId.truckNumber})`;
+    } else {
+      desc = t.note || category.replace('_', ' ');
+    }
 
     if (type === 'deposit') {
       rows.push({
-        type: 'deposit',
-        source: 'transaction',
+        type: category || 'deposit',
         date: t.date,
+        name: rowName,
         description: desc,
-        amount: Number(t.amount) || 0,
+        amount: t.amount,
         amountType: 'in',
         referenceId: t._id,
-        note: t.note || '',
       });
     } else if (type === 'withdraw') {
       rows.push({
-        type: 'withdraw',
-        source: 'transaction',
+        type: category || 'withdraw',
         date: t.date,
+        name: rowName,
         description: desc,
-        amount: Number(t.amount) || 0,
+        amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
-        note: t.note || '',
       });
-    } else {
-      // Transfer creates two rows: out from source, in to destination
+    } else if (type === 'transfer') {
+      // For Daily Memo, we show the cash movement
       rows.push({
         type: 'transfer',
-        source: 'transaction',
         date: t.date,
-        description: `Transfer → ${t.toAccountId?.name || '—'}`,
-        amount: Number(t.amount) || 0,
+        name: t.fromAccountId?.name || 'Account',
+        description: `Transfer to ${t.toAccountId?.name || '—'}`,
+        amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
-        note: t.note || '',
       });
       rows.push({
         type: 'transfer',
-        source: 'transaction',
         date: t.date,
-        description: `Transfer ← ${t.fromAccountId?.name || '—'}`,
-        amount: Number(t.amount) || 0,
+        name: t.toAccountId?.name || 'Account',
+        description: `Transfer from ${t.fromAccountId?.name || '—'}`,
+        amount: t.amount,
         amountType: 'in',
         referenceId: t._id,
-        note: t.note || '',
       });
     }
   });
 
-  // --- Mill Expenses (Debit / Out) ---
-  millExpenses.forEach((m) => {
-    const amt = Number(m.amount) || 0;
-    if (amt <= 0) return;
-    rows.push({
-      type: 'mill_expense',
-      source: 'mill_expense',
-      date: m.date,
-      description: `Mill Expense${m.category ? ` — ${m.category}` : ''}${m.note ? ` — ${m.note.slice(0, 30)}` : ''}`,
-      amount: amt,
-      amountType: 'out',
-      referenceId: m._id,
-      note: m.note || '',
-    });
-  });
-
-  // --- Mazdoor Expenses (Debit / Out) ---
-  mazdoorExpenses.forEach((me) => {
-    const amt = Number(me.totalAmount) || 0;
-    if (amt <= 0) return;
-    rows.push({
-      type: 'mazdoor_expense',
-      source: 'mazdoor_expense',
-      date: me.date,
-      description: `Mazdoor — ${me.mazdoorId?.name || '—'}${me.mazdoorItemId?.name ? ` (${me.mazdoorItemId.name})` : ''}`,
-      amount: amt,
-      amountType: 'out',
-      referenceId: me._id,
-      note: '',
-    });
-  });
-
-  // Sort all rows by date
-  rows.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  const totalIn = rows.filter((r) => r.amountType === 'in').reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const totalOut = rows.filter((r) => r.amountType === 'out').reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalIn = rows.filter(r => r.amountType === 'in').reduce((s, r) => s + r.amount, 0);
+  const totalOut = rows.filter(r => r.amountType === 'out').reduce((s, r) => s + r.amount, 0);
 
   res.json({
     success: true,
     data: rows,
     summary: {
+      openingBalance,
       totalIn,
       totalOut,
       net: totalIn - totalOut,
+      closingBalance: openingBalance + totalIn - totalOut
     },
   });
 };
