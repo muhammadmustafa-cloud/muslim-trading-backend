@@ -46,7 +46,7 @@ export const getDailyMemo = async (req, res) => {
   // 1. Calculate Opening Balance (Net flow before fromDate)
   // Logic: In (Deposit) - Out (Withdraw) for all time until fromDate
   const prevTransactions = await Transaction.aggregate([
-    { $match: { date: { $lt: fromDate } } },
+    { $match: { date: { $lt: fromDate }, category: { $ne: 'mill_expense' } } },
     {
       $group: {
         _id: null,
@@ -60,8 +60,11 @@ export const getDailyMemo = async (req, res) => {
     ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) 
     : 0;
 
-  // 2. Fetch Transactions in the range
-  const transactions = await Transaction.find({ date: { $gte: fromDate, $lte: toDate } })
+  // 2. Fetch Transactions in the range (excluding mill expenses)
+  const transactions = await Transaction.find({ 
+    date: { $gte: fromDate, $lte: toDate },
+    category: { $ne: 'mill_expense' } 
+  })
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
