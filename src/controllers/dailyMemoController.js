@@ -101,11 +101,11 @@ export const getDailyMemo = async (req, res) => {
     // Build richer description
     let desc = '';
     if (t.saleId) {
-      desc = `Sale — ${t.saleId.itemId?.name || t.saleId.itemName || 'Item'}`;
-      if (t.saleId.truckNumber) desc += ` (${t.saleId.truckNumber})`;
+      const bill = t.saleId._id?.toString().slice(-6).toUpperCase() || '—';
+      desc = `Sale — ${t.saleId.itemId?.name || t.saleId.itemName || 'Item'} (Bill: ${bill})`;
     } else if (t.stockEntryId) {
-      desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'}`;
-      if (t.stockEntryId.truckNumber) desc += ` (${t.stockEntryId.truckNumber})`;
+      const bill = t.stockEntryId._id?.toString().slice(-6).toUpperCase() || '—';
+      desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'} (Bill: ${bill})`;
     } else {
       desc = t.note || category.replace('_', ' ');
     }
@@ -116,6 +116,7 @@ export const getDailyMemo = async (req, res) => {
         date: t.date,
         name: rowName,
         description: desc,
+        accountName: t.toAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'in',
         referenceId: t._id,
@@ -126,6 +127,7 @@ export const getDailyMemo = async (req, res) => {
         date: t.date,
         name: rowName,
         description: desc,
+        accountName: t.fromAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
@@ -137,6 +139,7 @@ export const getDailyMemo = async (req, res) => {
         date: t.date,
         name: t.fromAccountId?.name || 'Account',
         description: `Transfer to ${t.toAccountId?.name || '—'}`,
+        accountName: t.fromAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
@@ -146,6 +149,7 @@ export const getDailyMemo = async (req, res) => {
         date: t.date,
         name: t.toAccountId?.name || 'Account',
         description: `Transfer from ${t.fromAccountId?.name || '—'}`,
+        accountName: t.toAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'in',
         referenceId: t._id,
