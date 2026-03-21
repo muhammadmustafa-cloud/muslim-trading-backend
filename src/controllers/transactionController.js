@@ -15,7 +15,7 @@ async function getAccountBalance(accountId) {
     StockEntry.aggregate([{ $match: { accountId: id } }, { $group: { _id: null, total: { $sum: '$amountPaid' } } }]),
     Transaction.aggregate([{ $match: { type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { type: 'withdraw', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { type: { $in: ['withdraw', 'salary'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
   ]);
   const credits = (salesResult[0]?.total ?? 0) + (depositIn[0]?.total ?? 0) + (transferIn[0]?.total ?? 0);
@@ -50,7 +50,7 @@ export const list = async (req, res) => {
 
     const [transactions, sales, stockEntries] = await Promise.all([
       (() => {
-        const filter = { ...dateF };
+        const filter = { ...dateF, type: { $ne: 'accrual' } };
         if (id) filter.$or = [{ fromAccountId: id }, { toAccountId: id }];
         if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
         else if (mazdoorOnly === 'true' || mazdoorOnly === true) filter.mazdoorId = { $ne: null };
@@ -160,6 +160,7 @@ export const list = async (req, res) => {
   } else if (mazdoorOnly === 'true' || mazdoorOnly === true) {
     filter.mazdoorId = { $ne: null };
   }
+  filter.type = { $ne: 'accrual' };
   if (dateFrom || dateTo) {
     Object.assign(filter, buildDateFilter(dateFrom, dateTo));
   }
@@ -178,8 +179,8 @@ export const list = async (req, res) => {
 
 export const create = async (req, res) => {
   const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, date } = req.body;
-  if (!type || !['deposit', 'withdraw', 'transfer'].includes(type)) {
-    return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, or transfer' });
+  if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary'].includes(type)) {
+    return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, or salary' });
   }
   const amt = Number(amount);
   if (isNaN(amt) || amt <= 0) {
@@ -190,13 +191,16 @@ export const create = async (req, res) => {
     if (!toAccountId) return res.status(400).json({ success: false, message: 'toAccountId required for deposit' });
   }
   const Account = (await import('../models/Account.js')).default;
-  if (type === 'withdraw') {
-    if (!fromAccountId) return res.status(400).json({ success: false, message: 'fromAccountId required for withdraw' });
+  if (type === 'withdraw' || type === 'salary') {
+    if (!fromAccountId) return res.status(400).json({ success: false, message: `fromAccountId required for ${type}` });
     const account = await Account.findById(fromAccountId).lean();
     const totalBalance = (account?.openingBalance ?? 0) + (await getAccountBalance(fromAccountId));
     if (totalBalance < amt) {
       return res.status(400).json({ success: false, message: `Insufficient balance. Available: ${totalBalance}` });
     }
+  }
+  if (type === 'salary') {
+    if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for salary' });
   }
   if (type === 'transfer') {
     if (!fromAccountId || !toAccountId) return res.status(400).json({ success: false, message: 'fromAccountId and toAccountId required for transfer' });
@@ -206,6 +210,10 @@ export const create = async (req, res) => {
     if (totalBalance < amt) {
       return res.status(400).json({ success: false, message: `Insufficient balance. Available: ${totalBalance}` });
     }
+  }
+  if (type === 'accrual') {
+    // Accruals for Mazdoor Salary/Earned don't require an account
+    if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for accrual' });
   }
 
   const transaction = await Transaction.create({

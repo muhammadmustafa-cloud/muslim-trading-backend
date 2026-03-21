@@ -46,12 +46,12 @@ export const getDailyMemo = async (req, res) => {
   // 1. Calculate Opening Balance (Net flow before fromDate)
   // Logic: In (Deposit) - Out (Withdraw) for all time until fromDate
   const prevTransactions = await Transaction.aggregate([
-    { $match: { date: { $lt: fromDate }, category: { $ne: 'mill_expense' } } },
+    { $match: { date: { $lt: fromDate }, category: { $ne: 'mill_expense' }, type: { $ne: 'accrual' } } },
     {
       $group: {
         _id: null,
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
       }
     }
   ]);
@@ -127,6 +127,17 @@ export const getDailyMemo = async (req, res) => {
         date: t.date,
         name: rowName,
         description: desc,
+        accountName: t.fromAccountId?.name || "Manual",
+        amount: t.amount,
+        amountType: 'out',
+        referenceId: t._id,
+      });
+    } else if (type === 'salary') {
+      rows.push({
+        type: 'salary',
+        date: t.date,
+        name: rowName,
+        description: desc || 'Salary Paid',
         accountName: t.fromAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'out',

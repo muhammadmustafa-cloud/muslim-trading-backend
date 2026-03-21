@@ -18,7 +18,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { name, phone, role, notes } = req.body;
+  const { name, phone, role, notes, monthlySalary } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
@@ -27,6 +27,7 @@ export const create = async (req, res) => {
     phone: (phone || '').trim(),
     role: (role || '').trim(),
     notes: (notes || '').trim(),
+    monthlySalary: Number(monthlySalary) || 0,
   });
   res.status(201).json({ success: true, data: mazdoor });
 };
@@ -42,6 +43,7 @@ export const update = async (req, res) => {
       phone: (req.body.phone ?? '').trim(),
       role: (req.body.role ?? '').trim(),
       notes: (req.body.notes ?? '').trim(),
+      monthlySalary: req.body.monthlySalary !== undefined ? Number(req.body.monthlySalary) || 0 : undefined,
     },
     { new: true, runValidators: true }
   ).lean();
@@ -62,31 +64,49 @@ export const getHistory = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Mazdoor not found' });
   }
   const { dateFrom, dateTo } = req.query;
-  const filter = { mazdoorId: new mongoose.Types.ObjectId(req.params.id) };
+  const mId = new mongoose.Types.ObjectId(req.params.id);
+  
+  const dateFilter = {};
   if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    dateFilter.date = {};
+    if (dateFrom) dateFilter.date.$gte = new Date(dateFrom);
     if (dateTo) {
       const d = new Date(dateTo);
       d.setHours(23, 59, 59, 999);
-      filter.date.$lte = d;
+      dateFilter.date.$lte = d;
     }
   }
-  const transactions = await Transaction.find(filter)
+
+  // Transactions (Payments/Advances)
+  const transactions = await Transaction.find({ mazdoorId: mId, ...dateFilter })
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .sort({ date: -1 })
-    .limit(500)
+    .limit(1000)
     .lean();
-  const totalPaid = transactions.filter((t) => t.type === 'withdraw').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+  // Also include Daily Wage Earnings (from MazdoorExpense) if needed for "Total Earned"
+  // Note: MazdoorExpense records work earn but also usually matches a "withdraw" transaction 
+  // if paid immediately. To avoid double counting for "Total Paid", we use Transaction.
+  
+  const totalPaid = transactions.filter((t) => t.type === 'withdraw' || t.type === 'salary').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   const totalReceived = transactions.filter((t) => t.type === 'deposit' && t.category === 'udhaar_received').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  
+  // Salary Accruals + Daily Wages (Credits)
+  const totalEarned = transactions
+    .filter((t) => t.category === 'salary_accrual' || t.category === 'mazdoor_expense')
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  
   res.json({
     success: true,
     data: {
       name: mazdoor.name,
+      monthlySalary: mazdoor.monthlySalary || 0,
       transactions,
       totalPaid,
       totalReceived,
+      totalEarned,
+      balance: totalEarned - (totalPaid - totalReceived),
     },
   });
 };
