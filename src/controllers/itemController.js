@@ -104,8 +104,10 @@ export const getKhata = async (req, res) => {
     quality: item.quality ?? '',
   }));
 
-  const totalCost = purchases.reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
-  const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.amountReceived) || 0), 0);
+  const totalCost = purchases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+  const totalBagsPurchased = purchases.reduce((sum, p) => sum + (Number(p.kattay) || 0), 0);
+  const totalBagsSold = sales.reduce((sum, s) => sum + (Number(s.kattay) || 0), 0);
   const profit = totalRevenue - totalCost;
 
   res.json({
@@ -118,6 +120,8 @@ export const getKhata = async (req, res) => {
       sales: salesWithItem,
       totalCost,
       totalRevenue,
+      totalBagsPurchased,
+      totalBagsSold,
       profit,
     },
   });
