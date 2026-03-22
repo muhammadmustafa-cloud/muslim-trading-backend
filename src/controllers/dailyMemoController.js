@@ -80,6 +80,10 @@ export const getDailyMemo = async (req, res) => {
       select: 'truckNumber itemId',
       populate: { path: 'itemId', select: 'name' }
     })
+    .populate({
+      path: 'machineryPurchaseId',
+      populate: { path: 'machineryItemId', select: 'name' }
+    })
     .sort({ date: 1, createdAt: 1 })
     .lean();
 
@@ -106,6 +110,8 @@ export const getDailyMemo = async (req, res) => {
     } else if (t.stockEntryId) {
       const bill = t.stockEntryId._id?.toString().slice(-6).toUpperCase() || '—';
       desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'} (Bill: ${bill})`;
+    } else if (t.machineryPurchaseId) {
+      desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
     } else {
       desc = t.note || category.replace('_', ' ');
     }

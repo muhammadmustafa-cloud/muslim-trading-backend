@@ -61,6 +61,10 @@ export const list = async (req, res) => {
           .populate('mazdoorId', 'name')
           .populate('stockEntryId')
           .populate('saleId')
+          .populate({
+            path: 'machineryPurchaseId',
+            populate: { path: 'machineryItemId', select: 'name' }
+          })
           .sort({ date: -1 })
           .lean();
       })(),
@@ -104,6 +108,7 @@ export const list = async (req, res) => {
         mazdoorName: t.mazdoorId?.name || '',
         stockEntryId: t.stockEntryId,
         saleId: t.saleId,
+        machineryPurchaseId: t.machineryPurchaseId,
       });
     });
     sales.forEach((s) => {
@@ -168,17 +173,19 @@ export const list = async (req, res) => {
   const transactions = await Transaction.find(filter)
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
-    .populate('supplierId', 'name')
-    .populate('mazdoorId', 'name')
     .populate('stockEntryId')
     .populate('saleId')
+    .populate({
+      path: 'machineryPurchaseId',
+      populate: { path: 'machineryItemId', select: 'name' }
+    })
     .sort({ date: -1 })
     .lean();
   res.json({ success: true, data: transactions });
 };
 
 export const create = async (req, res) => {
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, date } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, machineryPurchaseId, date } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, or salary' });
   }
@@ -226,6 +233,7 @@ export const create = async (req, res) => {
     note: (note || '').trim(),
     supplierId: supplierId || null,
     mazdoorId: mazdoorId || null,
+    machineryPurchaseId: machineryPurchaseId || null,
   });
 
   const populated = await Transaction.findById(transaction._id)

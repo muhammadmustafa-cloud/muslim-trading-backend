@@ -14,6 +14,8 @@ import transactionRoutes from './transactionRoutes.js';
 import dashboardRoutes from './dashboardRoutes.js';
 import dailyMemoRoutes from './dailyMemoRoutes.js';
 import millExpenseRoutes from './millExpenseRoutes.js';
+import machineryItemRoutes from './machineryItemRoutes.js';
+import machineryPurchaseRoutes from './machineryPurchaseRoutes.js';
 
 const router = Router();
 
@@ -32,6 +34,8 @@ router.use('/transactions', transactionRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/daily-memo', dailyMemoRoutes);
 router.use('/mill-expenses', millExpenseRoutes);
+router.use('/machinery-items', machineryItemRoutes);
+router.use('/machinery-purchases', machineryPurchaseRoutes);
 
 // Base API info
 router.get('/', (req, res) => {
