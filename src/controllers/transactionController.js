@@ -15,7 +15,7 @@ async function getAccountBalance(accountId) {
     StockEntry.aggregate([{ $match: { accountId: id } }, { $group: { _id: null, total: { $sum: '$amountPaid' } } }]),
     Transaction.aggregate([{ $match: { type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { type: { $in: ['withdraw', 'salary'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { type: { $in: ['withdraw', 'salary', 'tax'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
   ]);
   const credits = (salesResult[0]?.total ?? 0) + (depositIn[0]?.total ?? 0) + (transferIn[0]?.total ?? 0);
@@ -61,6 +61,7 @@ export const list = async (req, res) => {
           .populate('mazdoorId', 'name')
           .populate('stockEntryId')
           .populate('saleId')
+          .populate('taxTypeId', 'name')
           .populate({
             path: 'machineryPurchaseId',
             populate: { path: 'machineryItemId', select: 'name' }
@@ -109,6 +110,8 @@ export const list = async (req, res) => {
         stockEntryId: t.stockEntryId,
         saleId: t.saleId,
         machineryPurchaseId: t.machineryPurchaseId,
+        taxTypeId: t.taxTypeId,
+        taxTypeName: t.taxTypeId?.name || '',
       });
     });
     sales.forEach((s) => {
@@ -175,6 +178,7 @@ export const list = async (req, res) => {
     .populate('toAccountId', 'name')
     .populate('stockEntryId')
     .populate('saleId')
+    .populate('taxTypeId', 'name')
     .populate({
       path: 'machineryPurchaseId',
       populate: { path: 'machineryItemId', select: 'name' }
@@ -185,9 +189,9 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, machineryPurchaseId, date } = req.body;
-  if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary'].includes(type)) {
-    return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, or salary' });
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, machineryPurchaseId, taxTypeId, date } = req.body;
+  if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax'].includes(type)) {
+    return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, or tax' });
   }
   const amt = Number(amount);
   if (isNaN(amt) || amt <= 0) {
@@ -198,8 +202,10 @@ export const create = async (req, res) => {
     if (!toAccountId) return res.status(400).json({ success: false, message: 'toAccountId required for deposit' });
   }
   const Account = (await import('../models/Account.js')).default;
-  if (type === 'withdraw' || type === 'salary') {
+  if (type === 'withdraw' || type === 'salary' || type === 'tax') {
     if (!fromAccountId) return res.status(400).json({ success: false, message: `fromAccountId required for ${type}` });
+    if (type === 'tax' && !taxTypeId) return res.status(400).json({ success: false, message: 'taxTypeId required for tax payment' });
+    
     const account = await Account.findById(fromAccountId).lean();
     const totalBalance = (account?.openingBalance ?? 0) + (await getAccountBalance(fromAccountId));
     if (totalBalance < amt) {
@@ -234,6 +240,7 @@ export const create = async (req, res) => {
     supplierId: supplierId || null,
     mazdoorId: mazdoorId || null,
     machineryPurchaseId: machineryPurchaseId || null,
+    taxTypeId: taxTypeId || null,
   });
 
   const populated = await Transaction.findById(transaction._id)

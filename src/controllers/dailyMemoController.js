@@ -51,7 +51,7 @@ export const getDailyMemo = async (req, res) => {
       $group: {
         _id: null,
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary', 'tax']] }, '$amount', 0] } },
       }
     }
   ]);
@@ -84,6 +84,7 @@ export const getDailyMemo = async (req, res) => {
       path: 'machineryPurchaseId',
       populate: { path: 'machineryItemId', select: 'name' }
     })
+    .populate('taxTypeId', 'name')
     .sort({ date: 1, createdAt: 1 })
     .lean();
   
@@ -137,6 +138,8 @@ export const getDailyMemo = async (req, res) => {
       desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'} (Bill: ${bill})`;
     } else if (t.machineryPurchaseId) {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
+    } else if (t.taxTypeId) {
+      desc = `Tax: ${t.taxTypeId.name}`;
     } else {
       desc = t.note || category.replace('_', ' ');
     }
@@ -194,6 +197,17 @@ export const getDailyMemo = async (req, res) => {
         accountName: t.toAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'in',
+        referenceId: t._id,
+      });
+    } else if (type === 'tax') {
+      rows.push({
+        type: 'tax_payment',
+        date: t.date,
+        name: t.taxTypeId?.name || 'Tax',
+        description: desc || `Tax Payment: ${t.taxTypeId?.name || '—'}`,
+        accountName: t.fromAccountId?.name || "Manual",
+        amount: t.amount,
+        amountType: 'out',
         referenceId: t._id,
       });
     }

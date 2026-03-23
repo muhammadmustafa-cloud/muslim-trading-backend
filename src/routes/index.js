@@ -16,6 +16,7 @@ import dailyMemoRoutes from './dailyMemoRoutes.js';
 import millExpenseRoutes from './millExpenseRoutes.js';
 import machineryItemRoutes from './machineryItemRoutes.js';
 import machineryPurchaseRoutes from './machineryPurchaseRoutes.js';
+import taxTypeRoutes from './taxTypeRoutes.js';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.use('/daily-memo', dailyMemoRoutes);
 router.use('/mill-expenses', millExpenseRoutes);
 router.use('/machinery-items', machineryItemRoutes);
 router.use('/machinery-purchases', machineryPurchaseRoutes);
+router.use('/tax-types', taxTypeRoutes);
 
 // Base API info
 router.get('/', (req, res) => {

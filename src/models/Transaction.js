@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const transactionSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
-    type: { type: String, enum: ['deposit', 'withdraw', 'transfer', 'accrual', 'salary'], required: true },
+    type: { type: String, enum: ['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax'], required: true },
     fromAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     toAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     amount: { type: Number, required: true, min: 0 },
@@ -15,6 +15,7 @@ const transactionSchema = new mongoose.Schema(
     stockEntryId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockEntry', default: null },
     saleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', default: null },
     machineryPurchaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'MachineryPurchase', default: null },
+    taxTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaxType', default: null },
   },
   { timestamps: true }
 );
