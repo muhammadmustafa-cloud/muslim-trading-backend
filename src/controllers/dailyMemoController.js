@@ -46,7 +46,7 @@ export const getDailyMemo = async (req, res) => {
   // 1. Calculate Opening Balance (Net flow before fromDate)
   // Logic: In (Deposit) - Out (Withdraw) for all time until fromDate
   const prevTransactions = await Transaction.aggregate([
-    { $match: { date: { $lt: fromDate }, category: { $ne: 'mill_expense' }, type: { $ne: 'accrual' } } },
+    { $match: { date: { $lt: fromDate }, type: { $ne: 'accrual' } } },
     {
       $group: {
         _id: null,
@@ -63,7 +63,7 @@ export const getDailyMemo = async (req, res) => {
   // 2. Fetch Transactions in the range (excluding mill expenses)
   const transactions = await Transaction.find({ 
     date: { $gte: fromDate, $lte: toDate },
-    category: { $ne: 'mill_expense' } 
+    category: { $nin: ['mill_expense', 'accrual'] } 
   })
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
@@ -86,8 +86,33 @@ export const getDailyMemo = async (req, res) => {
     })
     .sort({ date: 1, createdAt: 1 })
     .lean();
+  
+  // 3. Aggregate daily Mill Expenses (Sumup)
+  const millSumup = await Transaction.aggregate([
+    { $match: { date: { $gte: fromDate, $lte: toDate }, category: 'mill_expense' } },
+    {
+      $group: {
+        _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+        total: { $sum: "$amount" }
+      }
+    }
+  ]);
 
   const rows = [];
+
+  // Add Mill Expense Summary rows
+  millSumup.forEach(m => {
+    rows.push({
+      type: 'mill_expense_summary',
+      date: new Date(m._id),
+      name: 'MILL KHARCH (Total)',
+      description: `Daily Total Expenses - (${m._id})`,
+      accountName: 'Mill Khata',
+      amount: m.total,
+      amountType: 'out',
+      referenceId: 'summary',
+    });
+  });
 
   transactions.forEach((t) => {
     const type = t.type;

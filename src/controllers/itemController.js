@@ -108,6 +108,10 @@ export const getKhata = async (req, res) => {
   const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
   const totalBagsPurchased = purchases.reduce((sum, p) => sum + (Number(p.kattay) || 0), 0);
   const totalBagsSold = sales.reduce((sum, s) => sum + (Number(s.kattay) || 0), 0);
+  const totalWeightPurchased = purchases.reduce((sum, p) => sum + (Number(p.receivedWeight) || 0), 0);
+  const totalWeightSold = sales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+  const totalMunPurchased = totalWeightPurchased / 40;
+  const totalMunSold = totalWeightSold / 40;
   const profit = totalRevenue - totalCost;
 
   res.json({
@@ -122,6 +126,8 @@ export const getKhata = async (req, res) => {
       totalRevenue,
       totalBagsPurchased,
       totalBagsSold,
+      totalMunPurchased,
+      totalMunSold,
       profit,
     },
   });
