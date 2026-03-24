@@ -1,0 +1,168 @@
+import Customer from '../models/Customer.js';
+import Supplier from '../models/Supplier.js';
+import Mazdoor from '../models/Mazdoor.js';
+import Account from '../models/Account.js';
+import Sale from '../models/Sale.js';
+import StockEntry from '../models/StockEntry.js';
+import Transaction from '../models/Transaction.js';
+import MachineryPurchase from '../models/MachineryPurchase.js';
+import Item from '../models/Item.js';
+import { getAccountBalance } from './transactionController.js';
+import { getCurrentStockData } from './stockController.js';
+
+export const getAuditSummary = async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    
+    const fromDate = dateFrom ? new Date(dateFrom) : new Date(0);
+    const toDate = dateTo ? new Date(dateTo) : new Date();
+    toDate.setHours(23, 59, 59, 999);
+
+    const [
+      accounts,
+      customers,
+      suppliers,
+      mazdoors,
+      machineryTotal,
+      stockData,
+      expenses,
+      taxes,
+      allItems
+    ] = await Promise.all([
+      Account.find({}).lean(),
+      Customer.find({}).lean(),
+      Supplier.find({}).lean(),
+      Mazdoor.find({}).lean(),
+      MachineryPurchase.aggregate([
+        { $match: { date: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      getCurrentStockData(),
+      Transaction.aggregate([
+        { $match: { date: { $gte: fromDate, $lte: toDate }, type: 'expense' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      Transaction.aggregate([
+        { $match: { date: { $gte: fromDate, $lte: toDate }, type: 'tax' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      Item.find({}).lean(),
+    ]);
+
+    // 1. Account Details
+    const accountDetails = [];
+    let totalCash = 0;
+    for (const a of accounts) {
+      const flow = await getAccountBalance(a._id);
+      const balance = (a.openingBalance ?? 0) + flow;
+      totalCash += balance;
+      accountDetails.push({ name: a.name, balance });
+    }
+
+    // 2. Detailed Customer Balances
+    const customerBalances = await Transaction.aggregate([
+      { $group: { 
+        _id: '$customerId', 
+        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+      } }
+    ]);
+    const salesAgg = await Sale.aggregate([
+       { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
+    ]);
+
+    const detailedCustomers = customers.map(c => {
+      const trans = customerBalances.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const sales = salesAgg.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
+      const balance = (c.openingBalance || 0) + sales.total - trans.totalIn + trans.totalOut;
+      return { _id: c._id, name: c.name, balance, phone: c.phone || '' };
+    }).sort((a, b) => b.balance - a.balance);
+
+    const totalReceivables = detailedCustomers.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0);
+    const totalCustomerPayables = detailedCustomers.filter(c => c.balance < 0).reduce((sum, c) => sum + Math.abs(c.balance), 0);
+
+    // 3. Detailed Supplier Balances
+    const supplierTrans = await Transaction.aggregate([
+      { $group: { 
+        _id: '$supplierId', 
+        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+      } }
+    ]);
+    const purchaseAgg = await StockEntry.aggregate([
+      { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
+    ]);
+
+    const detailedSuppliers = suppliers.map(s => {
+      const trans = supplierTrans.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const purchases = purchaseAgg.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
+      const balance = (s.openingBalance || 0) + purchases.total - trans.totalOut + trans.totalIn;
+      return { _id: s._id, name: s.name, balance, phone: s.phone || '' };
+    }).sort((a, b) => b.balance - a.balance);
+
+    const totalSupplierPayables = detailedSuppliers.filter(s => s.balance > 0).reduce((sum, s) => sum + s.balance, 0);
+
+    // 4. Detailed Mazdoor Balances
+    const mazdoorStats = await Transaction.aggregate([
+      { $match: { mazdoorId: { $ne: null } } },
+      { $group: {
+        _id: '$mazdoorId',
+        paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
+        earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
+      }}
+    ]);
+    const detailedMazdoors = mazdoors.map(m => {
+      const stat = mazdoorStats.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
+      const balance = stat.earned - stat.paid;
+      return { _id: m._id, name: m.name, balance, contact: m.contact || '' };
+    }).sort((a, b) => b.balance - a.balance);
+
+    const totalMazdoorPayables = detailedMazdoors.filter(m => m.balance > 0).reduce((sum, m) => sum + m.balance, 0);
+
+    // 5. Detailed Stock & Assets
+    const itemPriceMap = new Map(allItems.map(i => [i._id.toString(), i.price || 0]));
+    const detailedStock = stockData.map(item => ({
+      ...item,
+      value: item.quantity * (itemPriceMap.get(item.itemId?.toString()) || 0)
+    })).filter(i => i.quantity > 0);
+    const totalStockValue = detailedStock.reduce((sum, i) => sum + i.value, 0);
+
+    const detailedMachinery = await MachineryPurchase.find({ 
+      date: { $gte: fromDate, $lte: toDate } 
+    }).populate('machineryItemId', 'name').populate('supplierId', 'name').lean();
+
+    // 6. Detailed Expenses & Taxes
+    const detailedExpenses = await Transaction.find({
+      date: { $gte: fromDate, $lte: toDate },
+      type: 'expense'
+    }).populate('expenseTypeId', 'name').lean();
+
+    const detailedTaxes = await Transaction.find({
+      date: { $gte: fromDate, $lte: toDate },
+      type: 'tax'
+    }).populate('taxTypeId', 'name').lean();
+
+    res.json({
+      success: true,
+      data: {
+        totalCash,
+        totalReceivables,
+        totalPayables: totalCustomerPayables + totalSupplierPayables + totalMazdoorPayables,
+        totalStockValue,
+        totalMachineryValue: machineryTotal[0]?.total || 0,
+        
+        customers: detailedCustomers,
+        suppliers: detailedSuppliers,
+        mazdoors: detailedMazdoors,
+        stock: detailedStock,
+        machinery: detailedMachinery,
+        expenses: detailedExpenses,
+        taxes: detailedTaxes,
+        accounts: accountDetails
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

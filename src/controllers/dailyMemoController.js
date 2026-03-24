@@ -213,6 +213,17 @@ export const getDailyMemo = async (req, res) => {
         amountType: 'out',
         referenceId: t._id,
       });
+    } else if (type === 'tax') {
+      rows.push({
+        type: 'tax_payment',
+        date: t.date,
+        name: t.taxTypeId?.name || 'Tax',
+        description: desc || `Tax: ${t.taxTypeId?.name || '—'}`,
+        accountName: t.fromAccountId?.name || "Manual",
+        amount: t.amount,
+        amountType: 'out',
+        referenceId: t._id,
+      });
     }
   });
 

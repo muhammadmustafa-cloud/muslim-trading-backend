@@ -18,6 +18,7 @@ import machineryItemRoutes from './machineryItemRoutes.js';
 import machineryPurchaseRoutes from './machineryPurchaseRoutes.js';
 import taxTypeRoutes from './taxTypeRoutes.js';
 import expenseTypeRoutes from './expenseTypeRoutes.js';
+import auditRoutes from './auditRoutes.js';
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.use('/machinery-items', machineryItemRoutes);
 router.use('/machinery-purchases', machineryPurchaseRoutes);
 router.use('/tax-types', taxTypeRoutes);
 router.use('/expense-types', expenseTypeRoutes);
+router.use('/audit', auditRoutes);
 
 // Base API info
 router.get('/', (req, res) => {
