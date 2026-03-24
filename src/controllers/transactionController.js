@@ -12,16 +12,14 @@ import mongoose from 'mongoose';
 async function getAccountBalance(accountId) {
   if (!accountId) return 0;
   const id = new mongoose.Types.ObjectId(accountId);
-  const [salesResult, stockResult, depositIn, transferIn, withdrawOut, transferOut] = await Promise.all([
-    Sale.aggregate([{ $match: { accountId: id } }, { $group: { _id: null, total: { $sum: '$amountReceived' } } }]),
-    StockEntry.aggregate([{ $match: { accountId: id } }, { $group: { _id: null, total: { $sum: '$amountPaid' } } }]),
+  const [depositIn, transferIn, withdrawOut, transferOut] = await Promise.all([
     Transaction.aggregate([{ $match: { type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: { $in: ['withdraw', 'salary', 'tax', 'expense'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Transaction.aggregate([{ $match: { type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
   ]);
-  const credits = (salesResult[0]?.total ?? 0) + (depositIn[0]?.total ?? 0) + (transferIn[0]?.total ?? 0);
-  const debits = (stockResult[0]?.total ?? 0) + (withdrawOut[0]?.total ?? 0) + (transferOut[0]?.total ?? 0);
+  const credits = (depositIn[0]?.total ?? 0) + (transferIn[0]?.total ?? 0);
+  const debits = (withdrawOut[0]?.total ?? 0) + (transferOut[0]?.total ?? 0);
   return credits - debits;
 }
 

@@ -44,7 +44,6 @@ export const getDailyMemo = async (req, res) => {
   toDate.setHours(23, 59, 59, 999);
 
   // 1. Calculate Opening Balance (Net flow before fromDate)
-  // Logic: In (Deposit) - Out (Withdraw) for all time until fromDate
   const prevTransactions = await Transaction.aggregate([
     { $match: { date: { $lt: fromDate }, type: { $ne: 'accrual' } } },
     {
@@ -60,10 +59,10 @@ export const getDailyMemo = async (req, res) => {
     ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) 
     : 0;
 
-  // 2. Fetch Transactions in the range (excluding mill expenses)
+  // 2. Fetch ALL Transactions in range (Accruals excluded)
   const transactions = await Transaction.find({ 
     date: { $gte: fromDate, $lte: toDate },
-    category: { $nin: ['mill_expense', 'accrual'] } 
+    type: { $ne: 'accrual' }
   })
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
@@ -89,32 +88,7 @@ export const getDailyMemo = async (req, res) => {
     .sort({ date: 1, createdAt: 1 })
     .lean();
   
-  // 3. Aggregate daily Mill Expenses (Sumup)
-  const millSumup = await Transaction.aggregate([
-    { $match: { date: { $gte: fromDate, $lte: toDate }, category: 'mill_expense' } },
-    {
-      $group: {
-        _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
-        total: { $sum: "$amount" }
-      }
-    }
-  ]);
-
   const rows = [];
-
-  // Add Mill Expense Summary rows
-  millSumup.forEach(m => {
-    rows.push({
-      type: 'mill_expense_summary',
-      date: new Date(m._id),
-      name: 'MILL KHARCH (Total)',
-      description: `Daily Total Expenses - (${m._id})`,
-      accountName: 'Mill Khata',
-      amount: m.total,
-      amountType: 'out',
-      referenceId: 'summary',
-    });
-  });
 
   transactions.forEach((t) => {
     const type = t.type;
@@ -125,8 +99,8 @@ export const getDailyMemo = async (req, res) => {
     if (t.customerId) rowName = t.customerId.name;
     else if (t.supplierId) rowName = t.supplierId.name;
     else if (t.mazdoorId) rowName = t.mazdoorId.name;
-    else if (t.fromAccountId && type === 'withdraw') rowName = t.fromAccountId.name;
-    else if (t.toAccountId && type === 'deposit') rowName = t.toAccountId.name;
+    else if (t.fromAccountId && (type === 'withdraw' || type === 'transfer')) rowName = t.fromAccountId.name;
+    else if (t.toAccountId && (type === 'deposit' || type === 'transfer')) rowName = t.toAccountId.name;
     else rowName = category.replace('_', ' ').toUpperCase();
 
     // Build richer description
@@ -158,9 +132,9 @@ export const getDailyMemo = async (req, res) => {
         amountType: 'in',
         referenceId: t._id,
       });
-    } else if (type === 'withdraw') {
+    } else if (type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') {
       rows.push({
-        type: category || 'withdraw',
+        type: category || type,
         date: t.date,
         name: rowName,
         description: desc,
@@ -169,21 +143,9 @@ export const getDailyMemo = async (req, res) => {
         amountType: 'out',
         referenceId: t._id,
       });
-    } else if (type === 'salary') {
-      rows.push({
-        type: 'salary',
-        date: t.date,
-        name: rowName,
-        description: desc || 'Salary Paid',
-        accountName: t.fromAccountId?.name || "Manual",
-        amount: t.amount,
-        amountType: 'out',
-        referenceId: t._id,
-      });
     } else if (type === 'transfer') {
-      // For Daily Memo, we show the cash movement
       rows.push({
-        type: 'transfer',
+        type: 'transfer_out',
         date: t.date,
         name: t.fromAccountId?.name || 'Account',
         description: `Transfer to ${t.toAccountId?.name || '—'}`,
@@ -193,35 +155,13 @@ export const getDailyMemo = async (req, res) => {
         referenceId: t._id,
       });
       rows.push({
-        type: 'transfer',
+        type: 'transfer_in',
         date: t.date,
         name: t.toAccountId?.name || 'Account',
         description: `Transfer from ${t.fromAccountId?.name || '—'}`,
         accountName: t.toAccountId?.name || "Manual",
         amount: t.amount,
         amountType: 'in',
-        referenceId: t._id,
-      });
-    } else if (type === 'expense') {
-      rows.push({
-        type: 'expense_payment',
-        date: t.date,
-        name: t.expenseTypeId?.name || 'Expense',
-        description: desc || `Expense: ${t.expenseTypeId?.name || '—'}`,
-        accountName: t.fromAccountId?.name || "Manual",
-        amount: t.amount,
-        amountType: 'out',
-        referenceId: t._id,
-      });
-    } else if (type === 'tax') {
-      rows.push({
-        type: 'tax_payment',
-        date: t.date,
-        name: t.taxTypeId?.name || 'Tax',
-        description: desc || `Tax: ${t.taxTypeId?.name || '—'}`,
-        accountName: t.fromAccountId?.name || "Manual",
-        amount: t.amount,
-        amountType: 'out',
         referenceId: t._id,
       });
     }

@@ -105,6 +105,20 @@ export const create = async (req, res) => {
     notes: (notes || '').trim(),
   });
 
+  // NEW: Create linked Transaction for initial payment
+  if (paid > 0 && accountId) {
+    await Transaction.create({
+      date: entry.date,
+      type: 'withdraw',
+      fromAccountId: accountId,
+      amount: paid,
+      category: 'Supplier Payment',
+      note: (notes || '').trim() || `Initial payment for Stock Entry #${entry._id.toString().slice(-6).toUpperCase()}`,
+      stockEntryId: entry._id,
+      supplierId: entry.supplierId,
+    });
+  }
+
   const populated = await StockEntry.findById(entry._id)
     .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
@@ -167,6 +181,34 @@ export const update = async (req, res) => {
   if (accountId !== undefined) entry.accountId = accountId || null;
   if (notes !== undefined) entry.notes = (notes || '').trim();
   await entry.save();
+
+  // NEW: Sync the linked Transaction (only if it was the initial or auto-created one)
+  // Subsequent payments via payEntry create their own transactions, so we look for 
+  // the one that might exist or should exist based on amountPaid.
+  // Actually, simplifying: update the "Initial Payment" transaction if it exists.
+  const linkedTrans = await Transaction.findOne({ stockEntryId: entry._id, category: 'Supplier Payment' });
+  if (linkedTrans) {
+    if (entry.amountPaid > 0) {
+      linkedTrans.amount = entry.amountPaid;
+      linkedTrans.fromAccountId = entry.accountId;
+      linkedTrans.date = entry.date;
+      await linkedTrans.save();
+    } else {
+      await Transaction.findByIdAndDelete(linkedTrans._id);
+    }
+  } else if (entry.amountPaid > 0 && entry.accountId) {
+    await Transaction.create({
+      date: entry.date,
+      type: 'withdraw',
+      fromAccountId: entry.accountId,
+      amount: entry.amountPaid,
+      category: 'Supplier Payment',
+      note: entry.notes || `Initial payment for Stock Entry #${entry._id.toString().slice(-6).toUpperCase()}`,
+      stockEntryId: entry._id,
+      supplierId: entry.supplierId,
+    });
+  }
+
   const populated = await StockEntry.findById(entry._id)
     .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')

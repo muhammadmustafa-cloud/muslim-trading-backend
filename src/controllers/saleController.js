@@ -103,13 +103,8 @@ export const create = async (req, res) => {
   
   if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
 
-  const { availableQty, availableKattay } = await getAvailableQuantity(itemId);
-  if (computedQty > availableQty) {
-    return res.status(400).json({ success: false, message: `Stock kam he (Weight). Available: ${availableQty}kg. Aap enter kar rahe hain: ${computedQty}kg.` });
-  }
-  if (k > availableKattay) {
-    return res.status(400).json({ success: false, message: `Stock kam he (Kattay). Available: ${availableKattay} bags. Aap enter kar rahe hain: ${k} bags.` });
-  }
+  // NOTE: Stock validation removed to support manufacturing journey (Item A -> B + C)
+  // Owner will reconcile stock every 6 months.
 
   const bRate = Number(bardanaRate) || 0;
   // Auto-calculate bardanaAmount: kattay × bardanaRate OR use manual bardanaAmount
@@ -161,6 +156,21 @@ export const create = async (req, res) => {
     .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('accountId', 'name')
     .lean();
+
+  // NEW: Create linked Transaction for initial payment
+  if (received > 0 && accountId) {
+    await Transaction.create({
+      date: sale.date,
+      type: 'deposit',
+      toAccountId: accountId,
+      amount: received,
+      category: 'Sale Collection',
+      note: (notes || '').trim() || `Initial payment for Sale #${sale._id.toString().slice(-6).toUpperCase()}`,
+      saleId: sale._id,
+      customerId: sale.customerId,
+    });
+  }
+
   const row = { ...populated, itemName: populated.itemId?.name, category: populated.itemId?.categoryId?.name, quality: populated.itemId?.quality };
   res.status(201).json({ success: true, data: row });
 };
@@ -196,13 +206,7 @@ export const update = async (req, res) => {
   newQty = Math.max(0, newQty - sCut); // Deduct SH.CUT
   if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
 
-  const { availableQty, availableKattay } = await getAvailableQuantity(newItemId, sale._id);
-  if (newQty > availableQty) {
-    return res.status(400).json({ success: false, message: `Stock kam he (Weight). Available: ${availableQty}kg. Aap enter kar rahe hain: ${newQty}kg.` });
-  }
-  if (k > availableKattay) {
-    return res.status(400).json({ success: false, message: `Stock kam he (Kattay). Available: ${availableKattay} bags. Aap enter kar rahe hain: ${k} bags.` });
-  }
+  // NOTE: Stock validation removed to support manufacturing journey
 
   // Auto-calculate totalAmount
   const newRate = rate != null ? Number(rate) || 0 : sale.rate;
@@ -244,6 +248,30 @@ export const update = async (req, res) => {
   if (dueDate !== undefined) sale.dueDate = dueDate ? new Date(dueDate) : null;
   sale.paymentStatus = paymentStatus;
   await sale.save();
+
+  // NEW: Sync the linked Transaction (initial payment)
+  const linkedTrans = await Transaction.findOne({ saleId: sale._id, category: 'Sale Collection' });
+  if (linkedTrans) {
+    if (sale.amountReceived > 0) {
+      linkedTrans.amount = sale.amountReceived;
+      linkedTrans.toAccountId = sale.accountId;
+      linkedTrans.date = sale.date;
+      await linkedTrans.save();
+    } else {
+      await Transaction.findByIdAndDelete(linkedTrans._id);
+    }
+  } else if (sale.amountReceived > 0 && sale.accountId) {
+    await Transaction.create({
+      date: sale.date,
+      type: 'deposit',
+      toAccountId: sale.accountId,
+      amount: sale.amountReceived,
+      category: 'Sale Collection',
+      note: sale.notes || `Initial payment for Sale #${sale._id.toString().slice(-6).toUpperCase()}`,
+      saleId: sale._id,
+      customerId: sale.customerId,
+    });
+  }
 
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
