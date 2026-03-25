@@ -117,6 +117,11 @@ export const getDailyMemo = async (req, res) => {
       desc = `Tax: ${t.taxTypeId.name}`;
     } else if (t.expenseTypeId) {
       desc = `Expense: ${t.expenseTypeId.name}`;
+    } else if (category === 'mill_expense') {
+      const cleanNote = (t.note || '').replace(/^Mill:\s*/i, '').replace(/^Mill expense\s*—\s*/i, '');
+      desc = `Mill Expense | ${cleanNote || 'General'}`;
+    } else if (category === 'mazdoor_expense') {
+      desc = `Mazdoor Expense | ${t.note || 'General'}`;
     } else {
       desc = t.note || category.replace('_', ' ');
     }

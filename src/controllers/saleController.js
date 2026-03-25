@@ -94,14 +94,12 @@ export const create = async (req, res) => {
 
   const k = Number(kattay) || 0;
   const kpk = Number(kgPerKata) || 0;
-  // Use provided shCut or calculate based on Standard Rule: 0.1kg per bag
-  const sCut = shCut != null && Number(shCut) > 0 ? Number(shCut) : Number((k * 0.1).toFixed(2));
+  const sCut = Number(shCut) || 0;
 
-  // Auto-calculate quantity (total weight) from kattay × kgPerKata, then subtract shCut
-  let computedQty = k > 0 && kpk > 0 ? k * kpk : (Number(quantity) || 0);
-  computedQty = Math.max(0, computedQty - sCut); // Ensure it doesn't go below 0
+  // Use the provided quantity (Net Weight) directly as per manual entry requirement
+  const computedQty = Number(quantity) || 0;
   
-  if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
+  if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
 
   // NOTE: Stock validation removed to support manufacturing journey (Item A -> B + C)
   // Owner will reconcile stock every 6 months.
@@ -186,25 +184,11 @@ export const update = async (req, res) => {
   // Calculate new kattay-based values
   const k = kattay != null ? Number(kattay) : sale.kattay;
   const kpk = kgPerKata != null ? Number(kgPerKata) : sale.kgPerKata;
-  // Update shCut: if kattay changed and shCut wasn't explicitly sent, recalculate.
-  let sCut;
-  if (shCut != null) {
-    sCut = Number(shCut);
-  } else if (kattay != null) {
-    sCut = Number((k * 0.1).toFixed(2));
-  } else {
-    sCut = sale.shCut || 0;
-  }
+  const sCut = Number(shCut) || 0;
 
-  // Auto-calculate quantity
-  let newQty;
-  if (k > 0 && kpk > 0) {
-    newQty = k * kpk;
-  } else {
-    newQty = quantity != null ? Number(quantity) : sale.quantity;
-  }
-  newQty = Math.max(0, newQty - sCut); // Deduct SH.CUT
-  if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0 after SH.CUT' });
+  // Use the provided quantity (Net Weight) directly
+  const newQty = Number(quantity) || 0;
+  if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
 
   // NOTE: Stock validation removed to support manufacturing journey
 
