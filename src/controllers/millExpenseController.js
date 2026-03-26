@@ -81,6 +81,7 @@ export const create = async (req, res) => {
     amount: amt,
     category: (category || '').trim(),
     note: (note || '').trim(),
+    image: req.file ? req.file.filename : null,
   });
 
   await Transaction.create({
