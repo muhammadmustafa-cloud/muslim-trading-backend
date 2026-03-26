@@ -2,15 +2,22 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './config/index.js';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import logger from './utils/logger.js';
 import routes from './routes/index.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
 // Security
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(cors(config.cors));
 
 // Body parsing
@@ -27,6 +34,9 @@ if (config.env !== 'test') {
   );
   app.use(morgan('dev'));
 }
+
+// Serve static uploaded files (images)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // API routes
 app.use('/api', routes);

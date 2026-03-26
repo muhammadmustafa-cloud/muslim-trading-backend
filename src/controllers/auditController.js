@@ -96,11 +96,14 @@ export const getAuditSummary = async (req, res) => {
     const detailedSuppliers = suppliers.map(s => {
       const trans = supplierTrans.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
       const purchases = purchaseAgg.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
-      const balance = (s.openingBalance || 0) + purchases.total - trans.totalOut + trans.totalIn;
+      // Sign convention aligned with supplierController.getHistory:
+      // balance = opening + payments(Dr) - purchases(Cr) - deposits
+      // Positive = they owe us (advance/overpaid), Negative = we owe them (payable)
+      const balance = (s.openingBalance || 0) - purchases.total + trans.totalOut - trans.totalIn;
       return { _id: s._id, name: s.name, balance, phone: s.phone || '' };
-    }).sort((a, b) => b.balance - a.balance);
+    }).sort((a, b) => a.balance - b.balance);
 
-    const totalSupplierPayables = detailedSuppliers.filter(s => s.balance > 0).reduce((sum, s) => sum + s.balance, 0);
+    const totalSupplierPayables = detailedSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0);
 
     // 4. Detailed Mazdoor Balances
     const mazdoorStats = await Transaction.aggregate([

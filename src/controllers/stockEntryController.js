@@ -53,7 +53,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, dueDate, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, dueDate, truckNumber, gatePassNo, goods, accountId, notes } = req.body;
   if (!itemId || !supplierId) {
     return res.status(400).json({ success: false, message: 'itemId and supplierId are required' });
   }
@@ -101,6 +101,9 @@ export const create = async (req, res) => {
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus: status,
     truckNumber: (truckNumber || '').trim(),
+    gatePassNo: (gatePassNo || '').trim(),
+    goods: (goods || '').trim(),
+    image: req.file ? req.file.filename : null,
     accountId: accountId || null,
     notes: (notes || '').trim(),
   });
@@ -132,11 +135,13 @@ export const update = async (req, res) => {
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, truckNumber, accountId, notes } = req.body;
+  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, truckNumber, gatePassNo, goods, accountId, notes } = req.body;
   if (date != null) entry.date = new Date(date);
   if (itemId != null) entry.itemId = itemId;
   if (supplierId != null) entry.supplierId = supplierId;
   if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
+  if (gatePassNo !== undefined) entry.gatePassNo = (gatePassNo || '').trim();
+  if (goods !== undefined) entry.goods = (goods || '').trim();
   const k = kattay != null ? Number(kattay) || 0 : entry.kattay;
   const kg = kgPerKata != null ? Number(kgPerKata) || 0 : entry.kgPerKata;
   const gross = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : (entry.receivedWeight + (entry.shCut || 0)));
@@ -180,6 +185,9 @@ export const update = async (req, res) => {
 
   if (accountId !== undefined) entry.accountId = accountId || null;
   if (notes !== undefined) entry.notes = (notes || '').trim();
+  if (req.file) {
+    entry.image = req.file.filename;
+  }
   await entry.save();
 
   // NEW: Sync the linked Transaction (only if it was the initial or auto-created one)

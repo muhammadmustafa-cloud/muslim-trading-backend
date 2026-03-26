@@ -87,7 +87,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, customerId, itemId, kattay, kgPerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
   if (!customerId || !itemId) {
     return res.status(400).json({ success: false, message: 'customerId and itemId are required' });
   }
@@ -142,11 +142,14 @@ export const create = async (req, res) => {
     rate: r,
     totalAmount: computedTotal,
     truckNumber: (truckNumber || '').trim(),
+    gatePassNo: (gatePassNo || '').trim(),
+    goods: (goods || '').trim(),
     amountReceived: received,
     accountId: accountId || null,
     notes: (notes || '').trim(),
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus,
+    image: req.file ? req.file.filename : null,
   });
 
   const populated = await Sale.findById(sale._id)
@@ -178,7 +181,7 @@ export const update = async (req, res) => {
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, accountId, notes, dueDate } = req.body;
+  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
   const newItemId = itemId ? new mongoose.Types.ObjectId(itemId) : sale.itemId;
 
   // Calculate new kattay-based values
@@ -226,11 +229,16 @@ export const update = async (req, res) => {
   sale.rate = newRate;
   sale.totalAmount = computedTotal;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
+  if (gatePassNo !== undefined) sale.gatePassNo = (gatePassNo || '').trim();
+  if (goods !== undefined) sale.goods = (goods || '').trim();
   sale.amountReceived = received;
   if (accountId !== undefined) sale.accountId = accountId || null;
   if (notes !== undefined) sale.notes = (notes || '').trim();
   if (dueDate !== undefined) sale.dueDate = dueDate ? new Date(dueDate) : null;
   sale.paymentStatus = paymentStatus;
+  if (req.file) {
+    sale.image = req.file.filename;
+  }
   await sale.save();
 
   // NEW: Sync the linked Transaction (initial payment)

@@ -16,8 +16,11 @@ const saleSchema = new mongoose.Schema(
     bardanaAmount: { type: Number, default: 0, min: 0 },       // Normally kattay * bardanaRate
     mazdori: { type: Number, default: 0, min: 0 },             // Labor charges
     rate: { type: Number, default: 0 },                        // Rate per MUN (legacy fallback as per kg)
-    totalAmount: { type: Number, default: 0 },                 // Total bill
     truckNumber: { type: String, trim: true, default: '' },
+    truckNumber: { type: String, trim: true, default: '' },
+    gatePassNo: { type: String, trim: true, default: '' },
+    goods: { type: String, trim: true, default: '' },
+    image: { type: String, default: null },
     amountReceived: { type: Number, default: 0 },
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     notes: { type: String, trim: true, default: '' },
