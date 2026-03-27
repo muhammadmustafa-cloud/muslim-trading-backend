@@ -17,6 +17,7 @@ const transactionSchema = new mongoose.Schema(
     machineryPurchaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'MachineryPurchase', default: null },
     taxTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaxType', default: null },
     expenseTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExpenseType', default: null },
+    image: { type: String, default: null },
   },
   { timestamps: true }
 );

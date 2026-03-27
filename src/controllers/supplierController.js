@@ -128,8 +128,8 @@ export const getHistory = async (req, res) => {
 
   // 2. Fetch all data in parallel
   const [stockEntries, sales, transactions] = await Promise.all([
-    StockEntry.find(stockMatch).populate('itemId', 'name').lean(),
-    saleMatch ? Sale.find(saleMatch).populate('itemId', 'name').lean() : [],
+    StockEntry.find(stockMatch).populate('items.itemId', 'name').lean(),
+    saleMatch ? Sale.find(saleMatch).populate('items.itemId', 'name').lean() : [],
     Transaction.find(transMatch).populate('fromAccountId', 'name').populate('toAccountId', 'name').lean(),
   ]);
 
@@ -157,10 +157,18 @@ export const getHistory = async (req, res) => {
 
   // Purchases (Cr for us/supplier)
   stockEntries.forEach(e => {
+    const itemNames = (e.items && e.items.length > 0)
+      ? e.items.map(it => it.itemId?.name || 'Item').join(', ')
+      : (e.itemId?.name || 'Item');
+
+    const totalBags = (e.items && e.items.length > 0)
+      ? e.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
+      : (e.kattay || 0);
+
     ledger.push({
       date: e.date,
-      description: `Purchase: ${e.itemId?.name || 'Item'} (Truck: ${e.truckNumber || 'N/A'})`,
-      bags: e.kattay || 0,
+      description: `Purchase: ${itemNames} (Truck: ${e.truckNumber || 'N/A'})`,
+      bags: totalBags,
       debit: 0,
       credit: e.amount || 0,
       type: 'purchase',
@@ -170,10 +178,18 @@ export const getHistory = async (req, res) => {
 
   // Sales (Dr for them)
   sales.forEach(s => {
+    const itemNames = (s.items && s.items.length > 0) 
+      ? s.items.map(it => it.itemId?.name || 'Item').join(', ')
+      : (s.itemId?.name || 'Item');
+
+    const totalBags = (s.items && s.items.length > 0)
+      ? s.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
+      : (s.kattay || 0);
+
     ledger.push({
       date: s.date,
-      description: `Sale: ${s.itemId?.name || 'Item'} (Truck: ${s.truckNumber || 'N/A'})`,
-      bags: s.kattay || 0,
+      description: `Sale: ${itemNames} (Truck: ${s.truckNumber || 'N/A'})`,
+      bags: totalBags,
       debit: s.totalAmount || 0,
       credit: 0,
       type: 'sale',
@@ -242,7 +258,7 @@ export const getPayables = async (req, res) => {
           $push: {
             _id: '$_id',
             date: '$date',
-            itemId: '$itemId',
+            items: '$items',
             amount: '$amount',
             amountPaid: '$amountPaid',
             dueDate: '$dueDate',

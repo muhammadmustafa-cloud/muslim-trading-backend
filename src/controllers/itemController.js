@@ -77,25 +77,86 @@ export const getKhata = async (req, res) => {
   const hasDateFilter = Object.keys(dateFilter).length > 0;
   const itemId = new mongoose.Types.ObjectId(req.params.id);
 
-  const purchaseMatch = { itemId };
-  if (hasDateFilter) purchaseMatch.date = dateFilter;
-  const saleMatch = { itemId };
-  if (hasDateFilter) saleMatch.date = dateFilter;
-
-  const [purchases, sales] = await Promise.all([
-    StockEntry.find(purchaseMatch)
-      .populate('supplierId', 'name')
-      .populate('accountId', 'name')
-      .sort({ date: -1 })
-      .limit(500)
-      .lean(),
-    Sale.find(saleMatch)
-      .populate('customerId', 'name')
-      .populate('accountId', 'name')
-      .sort({ date: -1 })
-      .limit(500)
-      .lean(),
+  const [purchasesRaw, salesRaw] = await Promise.all([
+    StockEntry.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.itemId': itemId, ...(hasDateFilter ? { date: dateFilter } : {}) } },
+      {
+        $lookup: {
+          from: 'suppliers',
+          localField: 'supplierId',
+          foreignField: '_id',
+          as: 'supplierDoc'
+        }
+      },
+      {
+        $lookup: {
+          from: 'accounts',
+          localField: 'accountId',
+          foreignField: '_id',
+          as: 'accountDoc'
+        }
+      },
+      { $unwind: { path: '$supplierDoc', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$accountDoc', preserveNullAndEmptyArrays: true } },
+      { $sort: { date: -1 } },
+      { $limit: 1000 }
+    ]),
+    Sale.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.itemId': itemId, ...(hasDateFilter ? { date: dateFilter } : {}) } },
+      {
+        $lookup: {
+          from: 'customers',
+          localField: 'customerId',
+          foreignField: '_id',
+          as: 'customerDoc'
+        }
+      },
+      {
+        $lookup: {
+          from: 'accounts',
+          localField: 'accountId',
+          foreignField: '_id',
+          as: 'accountDoc'
+        }
+      },
+      { $unwind: { path: '$customerDoc', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$accountDoc', preserveNullAndEmptyArrays: true } },
+      { $sort: { date: -1 } },
+      { $limit: 1000 }
+    ])
   ]);
+
+  // Standardize the shape for the frontend
+  const purchases = purchasesRaw.map(p => ({
+    ...p,
+    itemId: p.items.itemId,
+    kattay: p.items.kattay,
+    kgPerKata: p.items.kgPerKata,
+    receivedWeight: p.items.itemNetWeight,
+    shCut: p.items.shCut,
+    rate: p.items.rate,
+    amount: p.items.amount,
+    bardanaAmount: p.items.bardanaAmount,
+    supplierId: p.supplierDoc ? { _id: p.supplierDoc._id, name: p.supplierDoc.name } : null,
+    accountId: p.accountDoc ? { _id: p.accountDoc._id, name: p.accountDoc.name } : null
+  }));
+
+  const sales = salesRaw.map(s => ({
+    ...s,
+    itemId: s.items.itemId,
+    kattay: s.items.kattay,
+    kgPerKata: s.items.kgPerKata,
+    quantity: s.items.quantity,
+    shCut: s.items.shCut,
+    rate: s.items.rate,
+    totalAmount: s.items.totalAmount,
+    bardanaAmount: s.items.bardanaAmount,
+    mazdori: s.items.mazdori,
+    customerId: s.customerDoc ? { _id: s.customerDoc._id, name: s.customerDoc.name } : null,
+    accountId: s.accountDoc ? { _id: s.accountDoc._id, name: s.accountDoc.name } : null
+  }));
 
   const salesWithItem = sales.map((s) => ({
     ...s,

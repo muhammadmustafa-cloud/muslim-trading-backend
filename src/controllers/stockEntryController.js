@@ -19,7 +19,7 @@ export const list = async (req, res) => {
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
 
   const entries = await StockEntry.find(filter)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .sort({ date: -1 })
@@ -33,7 +33,7 @@ export const listPending = async (req, res) => {
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
 
   const entries = await StockEntry.find(filter)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .sort({ dueDate: 1 })
     .lean();
@@ -42,7 +42,7 @@ export const listPending = async (req, res) => {
 
 export const getById = async (req, res) => {
   const entry = await StockEntry.findById(req.params.id)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -53,50 +53,77 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, dueDate, truckNumber, gatePassNo, goods, accountId, notes } = req.body;
-  if (!itemId || !supplierId) {
-    return res.status(400).json({ success: false, message: 'itemId and supplierId are required' });
-  }
-  const item = await Item.findById(itemId).lean();
-  if (!item) return res.status(400).json({ success: false, message: 'Item not found' });
-
-  const k = Number(kattay) || 0;
-  const kg = Number(kgPerKata) || 0;
-  const grossWeight = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : 0);
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
   
-  // Standard Rule for Purchase: 250g (0.25kg) cut per 40kg (1 MUN)
-  const sCut = shCut != null && Number(shCut) > 0 ? Number(shCut) : Number(((grossWeight / 40) * 0.25).toFixed(2));
-  const computedWeight = Math.max(0, grossWeight - sCut);
-
-  const r = Number(rate) || 0;
-  const bardana = bardanaAmount != null ? Number(bardanaAmount) : 0;
-  
-  // Professional MUN Based Calculation: (NetWeight / 40) * Rate + Bardana
-  let amt = 0;
-  if (computedWeight > 0 && r > 0) {
-    amt = Math.round((computedWeight / 40) * r) + bardana;
-  } else {
-    amt = amount != null ? Number(amount) : 0;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch (e) {
+      return res.status(400).json({ success: false, message: 'Invalid items format' });
+    }
   }
 
-  const paid = amountPaid != null ? Number(amountPaid) : 0;
+  const grossTotal = Number(totalGrossWeight) || 0;
+  const cutTotal = Number(totalSHCut) || 0;
+  const netTotal = Math.max(0, grossTotal - cutTotal);
+
+  let grandTotalAmount = 0;
+  
+  // Process each item
+  const processedItems = items.map(item => {
+    const k = Number(item.kattay) || 0;
+    const kg = Number(item.kgPerKata) || 0;
+    const lineGross = Number(item.grossWeight) || (k * kg);
+    
+    // Proportional SH Cut OR Standard 0.25kg rule
+    let lineSHCut = 0;
+    if (cutTotal > 0 && grossTotal > 0) {
+      lineSHCut = (lineGross / grossTotal) * cutTotal;
+    } else {
+      lineSHCut = Number(((lineGross / 40) * 0.25).toFixed(2));
+    }
+    
+    const lineNet = Math.max(0, lineGross - lineSHCut);
+    const r = Number(item.rate) || 0;
+    const bardana = Number(item.bardanaAmount) || 0;
+    
+    let lineTotal = 0;
+    if (lineNet > 0 && r > 0) {
+      lineTotal = Math.round((lineNet / 40) * r) + bardana;
+    } else {
+      lineTotal = Number(item.amount) || 0;
+    }
+
+    grandTotalAmount += lineTotal;
+
+    return {
+      itemId: item.itemId,
+      kattay: k,
+      kgPerKata: kg,
+      grossWeight: lineGross,
+      shCut: lineSHCut,
+      itemNetWeight: lineNet,
+      rate: r,
+      bardanaAmount: bardana,
+      amount: lineTotal
+    };
+  });
+
+  const paid = Number(amountPaid) || 0;
   let status = 'pending';
-  if (paid >= amt && amt > 0) status = 'paid';
+  if (paid >= grandTotalAmount && grandTotalAmount > 0) status = 'paid';
   else if (paid > 0) status = 'partial';
 
   const entry = await StockEntry.create({
     date: date ? new Date(date) : new Date(),
-    itemId,
     supplierId,
-    receivedWeight: computedWeight,
-    shCut: sCut,
-    kattay: k,
-    kgPerKata: kg,
-    millWeight: millWeight != null ? Number(millWeight) : 0,
-    supplierWeight: supplierWeight != null ? Number(supplierWeight) : 0,
-    rate: r,
-    amount: amt,
-    bardanaAmount: bardana,
+    totalGrossWeight: grossTotal,
+    totalSHCut: cutTotal || processedItems.reduce((sum, i) => sum + i.shCut, 0),
+    receivedWeight: netTotal || processedItems.reduce((sum, i) => sum + i.itemNetWeight, 0),
+    items: processedItems,
+    millWeight: Number(millWeight) || 0,
+    supplierWeight: Number(supplierWeight) || 0,
+    amount: grandTotalAmount,
     amountPaid: paid,
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus: status,
@@ -123,7 +150,7 @@ export const create = async (req, res) => {
   }
 
   const populated = await StockEntry.findById(entry._id)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -135,59 +162,83 @@ export const update = async (req, res) => {
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
-  const { date, itemId, supplierId, receivedWeight, kattay, kgPerKata, millWeight, supplierWeight, rate, shCut, amount, bardanaAmount, amountPaid, truckNumber, gatePassNo, goods, accountId, notes } = req.body;
+  
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch (e) {
+      // keep as string
+    }
+  }
+
   if (date != null) entry.date = new Date(date);
-  if (itemId != null) entry.itemId = itemId;
   if (supplierId != null) entry.supplierId = supplierId;
   if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
   if (gatePassNo !== undefined) entry.gatePassNo = (gatePassNo || '').trim();
   if (goods !== undefined) entry.goods = (goods || '').trim();
-  const k = kattay != null ? Number(kattay) || 0 : entry.kattay;
-  const kg = kgPerKata != null ? Number(kgPerKata) || 0 : entry.kgPerKata;
-  const gross = k > 0 && kg > 0 ? k * kg : (receivedWeight != null ? Number(receivedWeight) : (entry.receivedWeight + (entry.shCut || 0)));
-  
-  let sCut;
-  if (shCut != null) {
-      sCut = Number(shCut);
-  } else if (kattay != null || kgPerKata != null) {
-      sCut = Number(((gross / 40) * 0.25).toFixed(2));
-  } else {
-      sCut = entry.shCut || 0;
-  }
-  
-  entry.shCut = sCut;
-  entry.receivedWeight = Math.max(0, gross - sCut);
-  
-  if (kattay != null) entry.kattay = k;
-  if (kgPerKata != null) entry.kgPerKata = kg;
   if (millWeight != null) entry.millWeight = Number(millWeight) || 0;
   if (supplierWeight != null) entry.supplierWeight = Number(supplierWeight) || 0;
-  
-  const r = rate != null ? Number(rate) : entry.rate;
-  if (rate != null) entry.rate = r;
-  
-  const bardana = bardanaAmount != null ? Number(bardanaAmount) : entry.bardanaAmount;
-  if (bardanaAmount != null) entry.bardanaAmount = bardana;
-  
-  if (amount != null) {
-    entry.amount = Number(amount);
-  } else if (rate != null || kattay != null || kgPerKata != null || bardanaAmount != null) {
-    entry.amount = Math.round((entry.receivedWeight / 40) * r) + bardana;
-  }
-  
-  if (amountPaid != null) entry.amountPaid = Number(amountPaid);
+  if (accountId !== undefined) entry.accountId = accountId || null;
+  if (notes !== undefined) entry.notes = (notes || '').trim();
   if (req.body.dueDate !== undefined) entry.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
+  if (req.file) entry.image = req.file.filename;
+
+  const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : entry.totalGrossWeight;
+  const cutTotal = totalSHCut != null ? Number(totalSHCut) : entry.totalSHCut;
+  entry.totalGrossWeight = grossTotal;
+  entry.totalSHCut = cutTotal;
+  entry.receivedWeight = Math.max(0, grossTotal - cutTotal);
+
+  if (items && Array.isArray(items)) {
+    let grandTotalAmount = 0;
+    entry.items = items.map(item => {
+      const k = Number(item.kattay) || 0;
+      const kg = Number(item.kgPerKata) || 0;
+      const lineGross = Number(item.grossWeight) || (k * kg);
+      
+      let lineSHCut = 0;
+      if (cutTotal > 0 && grossTotal > 0) {
+        lineSHCut = (lineGross / grossTotal) * cutTotal;
+      } else {
+        lineSHCut = Number(((lineGross / 40) * 0.25).toFixed(2));
+      }
+      
+      const lineNet = Math.max(0, lineGross - lineSHCut);
+      const r = Number(item.rate) || 0;
+      const bardana = Number(item.bardanaAmount) || 0;
+      
+      let lineTotal = 0;
+      if (lineNet > 0 && r > 0) {
+        lineTotal = Math.round((lineNet / 40) * r) + bardana;
+      } else {
+        lineTotal = Number(item.amount) || 0;
+      }
+      grandTotalAmount += lineTotal;
+
+      return {
+        itemId: item.itemId,
+        kattay: k,
+        kgPerKata: kg,
+        grossWeight: lineGross,
+        shCut: lineSHCut,
+        itemNetWeight: lineNet,
+        rate: r,
+        bardanaAmount: bardana,
+        amount: lineTotal
+      };
+    });
+    entry.amount = grandTotalAmount;
+  }
+
+  if (amountPaid != null) entry.amountPaid = Number(amountPaid);
 
   // Recalculate status
   if (entry.amountPaid >= entry.amount && entry.amount > 0) entry.paymentStatus = 'paid';
   else if (entry.amountPaid > 0) entry.paymentStatus = 'partial';
   else entry.paymentStatus = 'pending';
 
-  if (accountId !== undefined) entry.accountId = accountId || null;
-  if (notes !== undefined) entry.notes = (notes || '').trim();
-  if (req.file) {
-    entry.image = req.file.filename;
-  }
   await entry.save();
 
   // NEW: Sync the linked Transaction (only if it was the initial or auto-created one)
@@ -218,7 +269,7 @@ export const update = async (req, res) => {
   }
 
   const populated = await StockEntry.findById(entry._id)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -269,7 +320,7 @@ export const payEntry = async (req, res) => {
   await entry.save();
 
   const populated = await StockEntry.findById(entry._id)
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();

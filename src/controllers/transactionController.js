@@ -72,7 +72,7 @@ export const list = async (req, res) => {
         return Sale.find(filter)
           .populate('customerId', 'name')
           .populate('accountId', 'name')
-          .populate('itemId', 'name')
+          .populate('items.itemId', 'name')
           .sort({ date: -1 })
           .lean();
       })(),
@@ -82,7 +82,7 @@ export const list = async (req, res) => {
         return StockEntry.find(filter)
           .populate('supplierId', 'name')
           .populate('accountId', 'name')
-          .populate('itemId', 'name')
+          .populate('items.itemId', 'name')
           .sort({ date: -1 })
           .lean();
       })(),
@@ -128,7 +128,7 @@ export const list = async (req, res) => {
         source: 'sale',
         referenceId: s._id,
         customerName: s.customerId?.name,
-        itemName: s.itemId?.name,
+        itemName: (s.items && s.items.length > 0) ? s.items.map(it => it.itemId?.name || 'Item').join(', ') : (s.itemId?.name || 'Item'),
       });
     });
     stockEntries.forEach((e) => {
@@ -146,7 +146,7 @@ export const list = async (req, res) => {
         source: 'stock_entry',
         referenceId: e._id,
         supplierName: e.supplierId?.name,
-        itemName: e.itemId?.name,
+        itemName: (e.items && e.items.length > 0) ? e.items.map(it => it.itemId?.name || 'Item').join(', ') : (e.itemId?.name || 'Item'),
       });
     });
 
@@ -239,6 +239,7 @@ export const create = async (req, res) => {
     machineryPurchaseId: machineryPurchaseId || null,
     taxTypeId: taxTypeId || null,
     expenseTypeId: expenseTypeId || null,
+    image: req.file ? req.file.filename : null,
   });
 
   const populated = await Transaction.findById(transaction._id)

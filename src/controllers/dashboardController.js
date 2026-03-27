@@ -27,7 +27,7 @@ export const getSummary = async (req, res) => {
     Account.find({}).lean(),
     Sale.aggregate([
       { $match: { date: { $gte: todayStart, $lte: todayEnd } } },
-      { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$amountReceived' } } }, // amount received today
+      { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' } } }, // full total for today
     ]),
     getCurrentStockData(),
     StockEntry.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),

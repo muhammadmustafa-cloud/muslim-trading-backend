@@ -71,13 +71,13 @@ export const getDailyMemo = async (req, res) => {
     .populate('mazdoorId', 'name')
     .populate({
       path: 'saleId',
-      select: 'truckNumber itemId itemName',
-      populate: { path: 'itemId', select: 'name' }
+      select: 'truckNumber items itemName',
+      populate: { path: 'items.itemId', select: 'name' }
     })
     .populate({
       path: 'stockEntryId',
-      select: 'truckNumber itemId',
-      populate: { path: 'itemId', select: 'name' }
+      select: 'truckNumber items',
+      populate: { path: 'items.itemId', select: 'name' }
     })
     .populate({
       path: 'machineryPurchaseId',
@@ -107,10 +107,12 @@ export const getDailyMemo = async (req, res) => {
     let desc = '';
     if (t.saleId) {
       const bill = t.saleId._id?.toString().slice(-6).toUpperCase() || '—';
-      desc = `Sale — ${t.saleId.itemId?.name || t.saleId.itemName || 'Item'} (Bill: ${bill})`;
+      const itemNames = t.saleId.items?.length > 0 ? t.saleId.items.map(it => it.itemId?.name || 'Item').join(', ') : (t.saleId.itemName || 'Item');
+      desc = `Sale — ${itemNames} (Bill: ${bill})`;
     } else if (t.stockEntryId) {
       const bill = t.stockEntryId._id?.toString().slice(-6).toUpperCase() || '—';
-      desc = `Purchase — ${t.stockEntryId.itemId?.name || 'Item'} (Bill: ${bill})`;
+      const itemNames = t.stockEntryId.items?.length > 0 ? t.stockEntryId.items.map(it => it.itemId?.name || 'Item').join(', ') : 'Item';
+      desc = `Purchase — ${itemNames} (Bill: ${bill})`;
     } else if (t.machineryPurchaseId) {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
     } else if (t.taxTypeId) {

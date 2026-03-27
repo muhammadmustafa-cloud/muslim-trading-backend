@@ -129,8 +129,8 @@ export const getHistory = async (req, res) => {
 
   // 2. Fetch all data in parallel
   const [sales, stockEntries, transactions] = await Promise.all([
-    Sale.find(saleMatch).populate('itemId', 'name').populate('accountId', 'name').lean(),
-    stockMatch ? StockEntry.find(stockMatch).populate('itemId', 'name').lean() : [],
+    Sale.find(saleMatch).populate('items.itemId', 'name').populate('accountId', 'name').lean(),
+    stockMatch ? StockEntry.find(stockMatch).populate('items.itemId', 'name').lean() : [],
     Transaction.find(transMatch).populate('fromAccountId', 'name').populate('toAccountId', 'name').lean(),
   ]);
 
@@ -158,10 +158,18 @@ export const getHistory = async (req, res) => {
 
   // Sales (Dr for customer)
   sales.forEach(s => {
+    const itemNames = (s.items && s.items.length > 0) 
+      ? s.items.map(it => it.itemId?.name || 'Item').join(', ')
+      : (s.itemId?.name || 'Item');
+
+    const totalBags = (s.items && s.items.length > 0)
+      ? s.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
+      : (s.kattay || 0);
+
     ledger.push({
       date: s.date,
-      description: `Sale: ${s.itemId?.name || 'Item'} (Truck: ${s.truckNumber || 'N/A'})`,
-      bags: s.kattay || 0,
+      description: `Sale: ${itemNames} (Truck: ${s.truckNumber || 'N/A'})`,
+      bags: totalBags,
       debit: s.totalAmount || 0,
       credit: 0,
       type: 'sale',
@@ -171,10 +179,18 @@ export const getHistory = async (req, res) => {
 
   // Stock Entries (Cr for customer/supplier)
   stockEntries.forEach(e => {
+    const itemNames = (e.items && e.items.length > 0)
+      ? e.items.map(it => it.itemId?.name || 'Item').join(', ')
+      : (e.itemId?.name || 'Item');
+
+    const totalBags = (e.items && e.items.length > 0)
+      ? e.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
+      : (e.kattay || 0);
+
     ledger.push({
       date: e.date,
-      description: `Purchase: ${e.itemId?.name || 'Item'} (Truck: ${e.truckNumber || 'N/A'})`,
-      bags: e.kattay || 0,
+      description: `Purchase: ${itemNames} (Truck: ${e.truckNumber || 'N/A'})`,
+      bags: totalBags,
       debit: 0,
       credit: e.amount || 0,
       type: 'purchase',
@@ -237,7 +253,7 @@ export const getHistory = async (req, res) => {
 export const getReceivables = async (req, res) => {
   const sales = await Sale.find({ paymentStatus: { $in: ['pending', 'partial'] } })
     .populate('customerId', 'name')
-    .populate({ path: 'itemId', select: 'name' })
+    .populate({ path: 'items.itemId', select: 'name' })
     .sort({ dueDate: 1 })
     .lean();
 
@@ -265,7 +281,7 @@ export const getReceivables = async (req, res) => {
     g.bills.push({
       _id: s._id,
       date: s.date,
-      itemId: s.itemId,
+      items: s.items,
       totalAmount: s.totalAmount,
       amountReceived: s.amountReceived || 0,
       dueDate: s.dueDate,

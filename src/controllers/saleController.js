@@ -6,18 +6,24 @@ import mongoose from 'mongoose';
 
 async function getAvailableQuantity(itemId, excludeSaleId = null) {
   const itemObjId = new mongoose.Types.ObjectId(itemId);
+  
+  // Sum In from StockEntry.items
   const inResult = await StockEntry.aggregate([
-    { $match: { itemId: itemObjId } },
-    { $group: { _id: null, totalQty: { $sum: '$receivedWeight' }, totalKattay: { $sum: '$kattay' } } },
+    { $unwind: '$items' },
+    { $match: { 'items.itemId': itemObjId } },
+    { $group: { _id: null, totalQty: { $sum: '$items.itemNetWeight' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
   const stockInQty = inResult[0]?.totalQty ?? 0;
   const stockInKattay = inResult[0]?.totalKattay ?? 0;
 
-  const saleMatch = { itemId: itemObjId };
+  // Sum Out from Sale.items
+  const saleMatch = { 'items.itemId': itemObjId };
   if (excludeSaleId) saleMatch._id = { $ne: new mongoose.Types.ObjectId(excludeSaleId) };
+  
   const outResult = await Sale.aggregate([
+    { $unwind: '$items' },
     { $match: saleMatch },
-    { $group: { _id: null, totalQty: { $sum: '$quantity' }, totalKattay: { $sum: '$kattay' } } },
+    { $group: { _id: null, totalQty: { $sum: '$items.quantity' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
   const stockOutQty = outResult[0]?.totalQty ?? 0;
   const stockOutKattay = outResult[0]?.totalKattay ?? 0;
@@ -54,7 +60,7 @@ export const list = async (req, res) => {
 
   const sales = await Sale.find(filter)
     .populate('customerId', 'name')
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('accountId', 'name')
     .sort({ date: -1 })
     .lean();
@@ -72,7 +78,7 @@ export const list = async (req, res) => {
 export const getById = async (req, res) => {
   const sale = await Sale.findById(req.params.id)
     .populate('customerId', 'name')
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('accountId', 'name')
     .lean();
   if (!sale) {
@@ -88,64 +94,79 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { date, customerId, itemId, kattay, kgPerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
-  if (!customerId || !itemId) {
-    return res.status(400).json({ success: false, message: 'customerId and itemId are required' });
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  
+  // Parse items if they come as a JSON string (typical for FormData)
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch (e) {
+      return res.status(400).json({ success: false, message: 'Invalid items format' });
+    }
   }
 
-  const k = Number(kattay) || 0;
-  const kpk = Number(kgPerKata) || 0;
-  const sCut = Number(shCut) || 0;
+  const grossTotal = Number(totalGrossWeight) || 0;
+  const cutTotal = Number(totalSHCut) || 0;
+  const netTotal = Math.max(0, grossTotal - cutTotal);
 
-  // Use the provided quantity (Net Weight) directly as per manual entry requirement
-  const computedQty = Number(quantity) || 0;
+  let grandTotalAmount = 0;
   
-  if (computedQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
+  // Process each item
+  const processedItems = items.map(item => {
+    const k = Number(item.kattay) || 0;
+    const kpk = Number(item.kgPerKata) || 0;
+    const lineGross = Number(item.grossWeight) || (k * kpk);
+    
+    // Proportional SH Cut splitting
+    const lineSHCut = grossTotal > 0 ? (lineGross / grossTotal) * cutTotal : 0;
+    const lineNet = Math.max(0, lineGross - lineSHCut);
+    
+    const bRate = Number(item.bardanaRate) || 0;
+    const bardana = Number(item.bardanaAmount) || (k * bRate);
+    const mazdori = Number(item.mazdori) || 0;
+    const rate = Number(item.rate) || 0;
+    
+    let lineTotal = 0;
+    if (lineNet > 0 && rate > 0) {
+      lineTotal = Math.round((lineNet / 40) * rate) + bardana + mazdori;
+    } else {
+      lineTotal = (Number(item.totalAmount) || 0) + bardana + mazdori;
+    }
 
-  // NOTE: Stock validation removed to support manufacturing journey (Item A -> B + C)
-  // Owner will reconcile stock every 6 months.
+    grandTotalAmount += lineTotal;
 
-  const bRate = Number(bardanaRate) || 0;
-  // Auto-calculate bardanaAmount: kattay × bardanaRate OR use manual bardanaAmount
-  const bardana = bRate > 0 && k > 0 ? (k * bRate) : (Number(bardanaAmount) || 0);
-  
-  const mazdoriAmt = Number(mazdori) || 0;
-  const r = Number(rate) || 0;
-
-  // Auto-calculate totalAmount: 
-  // (Quantity / 40) × rate (since rate is per MUN based on user feedback)
-  let computedTotal;
-  if (computedQty > 0 && r > 0) {
-    const mun = computedQty / 40;
-    computedTotal = Math.round(mun * r) + bardana + mazdoriAmt;
-  } else {
-    computedTotal = (Number(totalAmount) || 0) + bardana + mazdoriAmt;
-  }
+    return {
+      itemId: item.itemId,
+      kattay: k,
+      kgPerKata: kpk,
+      grossWeight: lineGross,
+      shCut: lineSHCut,
+      quantity: lineNet,
+      rate,
+      bardanaRate: bRate,
+      bardanaAmount: bardana,
+      mazdori,
+      totalAmount: lineTotal
+    };
+  });
 
   const received = Number(amountReceived) || 0;
-
-  // Auto paymentStatus
   let paymentStatus = 'pending';
-  if (computedTotal > 0 && received >= computedTotal) paymentStatus = 'paid';
+  if (grandTotalAmount > 0 && received >= grandTotalAmount) paymentStatus = 'paid';
   else if (received > 0) paymentStatus = 'partial';
 
   const sale = await Sale.create({
     date: date ? new Date(date) : new Date(),
     customerId,
-    itemId,
-    kattay: k,
-    kgPerKata: kpk,
-    quantity: computedQty,
-    shCut: sCut,
-    bardanaRate: bRate,
-    bardanaAmount: bardana,
-    mazdori: mazdoriAmt,
-    rate: r,
-    totalAmount: computedTotal,
+    totalGrossWeight: grossTotal,
+    totalSHCut: cutTotal,
+    netWeight: netTotal,
+    items: processedItems,
     truckNumber: (truckNumber || '').trim(),
     gatePassNo: (gatePassNo || '').trim(),
     goods: (goods || '').trim(),
     amountReceived: received,
+    totalAmount: grandTotalAmount,
     accountId: accountId || null,
     notes: (notes || '').trim(),
     dueDate: dueDate ? new Date(dueDate) : null,
@@ -155,7 +176,7 @@ export const create = async (req, res) => {
 
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('accountId', 'name')
     .lean();
 
@@ -182,64 +203,79 @@ export const update = async (req, res) => {
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
-  const { date, customerId, itemId, kattay, kgPerKata, ratePerKata, quantity, shCut, bardanaRate, bardanaAmount, mazdori, rate, totalAmount, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
-  const newItemId = itemId ? new mongoose.Types.ObjectId(itemId) : sale.itemId;
 
-  // Calculate new kattay-based values
-  const k = kattay != null ? Number(kattay) : sale.kattay;
-  const kpk = kgPerKata != null ? Number(kgPerKata) : sale.kgPerKata;
-  const sCut = Number(shCut) || 0;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
 
-  // Use the provided quantity (Net Weight) directly
-  const newQty = Number(quantity) || 0;
-  if (newQty < 0) return res.status(400).json({ success: false, message: 'Quantity must be >= 0' });
-
-  // NOTE: Stock validation removed to support manufacturing journey
-
-  // Auto-calculate totalAmount
-  const newRate = rate != null ? Number(rate) || 0 : sale.rate;
-  const bRate = bardanaRate != null ? Number(bardanaRate) : (sale.bardanaRate || 0);
-  const bardana = bRate > 0 && k > 0 ? (k * bRate) : (bardanaAmount != null ? Number(bardanaAmount) : sale.bardanaAmount);
-  const mazdoriAmt = mazdori != null ? Number(mazdori) : (sale.mazdori || 0);
-
-  let computedTotal;
-  if (newQty > 0 && newRate > 0) {
-    const mun = newQty / 40;
-    computedTotal = Math.round(mun * newRate) + bardana + mazdoriAmt;
-  } else {
-    computedTotal = (totalAmount != null ? Number(totalAmount) : sale.totalAmount) + bardana + mazdoriAmt;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch (e) {
+      // items remains a string, handle below
+    }
   }
-
-  const received = amountReceived != null ? Number(amountReceived) : sale.amountReceived;
-
-  // Auto paymentStatus
-  let paymentStatus = 'pending';
-  if (computedTotal > 0 && received >= computedTotal) paymentStatus = 'paid';
-  else if (received > 0) paymentStatus = 'partial';
 
   if (date != null) sale.date = new Date(date);
   if (customerId != null) sale.customerId = customerId;
-  if (itemId != null) sale.itemId = newItemId;
-  sale.kattay = k;
-  sale.kgPerKata = kpk;
-  sale.quantity = newQty;
-  sale.shCut = sCut;
-  sale.bardanaRate = bRate;
-  sale.bardanaAmount = bardana;
-  sale.mazdori = mazdoriAmt;
-  sale.rate = newRate;
-  sale.totalAmount = computedTotal;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
   if (gatePassNo !== undefined) sale.gatePassNo = (gatePassNo || '').trim();
   if (goods !== undefined) sale.goods = (goods || '').trim();
-  sale.amountReceived = received;
   if (accountId !== undefined) sale.accountId = accountId || null;
   if (notes !== undefined) sale.notes = (notes || '').trim();
   if (dueDate !== undefined) sale.dueDate = dueDate ? new Date(dueDate) : null;
-  sale.paymentStatus = paymentStatus;
-  if (req.file) {
-    sale.image = req.file.filename;
+  if (req.file) sale.image = req.file.filename;
+
+  const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : sale.totalGrossWeight;
+  const cutTotal = totalSHCut != null ? Number(totalSHCut) : sale.totalSHCut;
+  sale.totalGrossWeight = grossTotal;
+  sale.totalSHCut = cutTotal;
+  sale.netWeight = Math.max(0, grossTotal - cutTotal);
+
+  if (items && Array.isArray(items)) {
+    let grandTotalAmount = 0;
+    sale.items = items.map(item => {
+      const k = Number(item.kattay) || 0;
+      const kpk = Number(item.kgPerKata) || 0;
+      const lineGross = Number(item.grossWeight) || (k * kpk);
+      const lineSHCut = grossTotal > 0 ? (lineGross / grossTotal) * cutTotal : 0;
+      const lineNet = Math.max(0, lineGross - lineSHCut);
+      
+      const bRate = Number(item.bardanaRate) || 0;
+      const bardana = Number(item.bardanaAmount) || (k * bRate);
+      const mazdori = Number(item.mazdori) || 0;
+      const rate = Number(item.rate) || 0;
+      
+      let lineTotal = 0;
+      if (lineNet > 0 && rate > 0) {
+        lineTotal = Math.round((lineNet / 40) * rate) + bardana + mazdori;
+      } else {
+        lineTotal = (Number(item.totalAmount) || 0) + bardana + mazdori;
+      }
+      grandTotalAmount += lineTotal;
+
+      return {
+        itemId: item.itemId,
+        kattay: k,
+        kgPerKata: kpk,
+        grossWeight: lineGross,
+        shCut: lineSHCut,
+        quantity: lineNet,
+        rate,
+        bardanaRate: bRate,
+        bardanaAmount: bardana,
+        mazdori,
+        totalAmount: lineTotal
+      };
+    });
+    sale.totalAmount = grandTotalAmount;
   }
+
+  if (amountReceived != null) sale.amountReceived = Number(amountReceived);
+
+  // Recalculate status
+  if (sale.totalAmount > 0 && sale.amountReceived >= sale.totalAmount) sale.paymentStatus = 'paid';
+  else if (sale.amountReceived > 0) sale.paymentStatus = 'partial';
+  else sale.paymentStatus = 'pending';
+
   await sale.save();
 
   // NEW: Sync the linked Transaction (initial payment)
@@ -268,11 +304,10 @@ export const update = async (req, res) => {
 
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
-    .populate({ path: 'itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('accountId', 'name')
     .lean();
-  const row = { ...populated, itemName: populated.itemId?.name, category: populated.itemId?.categoryId?.name, quality: populated.itemId?.quality };
-  res.json({ success: true, data: row });
+  res.json({ success: true, data: populated });
 };
 
 
