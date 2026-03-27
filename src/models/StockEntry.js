@@ -22,7 +22,6 @@ const stockEntrySchema = new mongoose.Schema(
       default: 'pending',
     },
     truckNumber: { type: String, trim: true, default: '' },
-    truckNumber: { type: String, trim: true, default: '' },
     gatePassNo: { type: String, trim: true, default: '' },
     goods: { type: String, trim: true, default: '' },
     image: { type: String, default: null },
