@@ -58,6 +58,7 @@ export const list = async (req, res) => {
           .populate('fromAccountId', 'name')
           .populate('toAccountId', 'name')
           .populate('supplierId', 'name')
+          .populate('customerId', 'name')
           .populate('mazdoorId', 'name')
           .populate('stockEntryId')
           .populate('saleId')
@@ -175,6 +176,9 @@ export const list = async (req, res) => {
   const transactions = await Transaction.find(filter)
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
+    .populate('supplierId', 'name')
+    .populate('customerId', 'name')
+    .populate('mazdoorId', 'name')
     .populate('stockEntryId')
     .populate('saleId')
     .populate('taxTypeId', 'name')
@@ -185,7 +189,7 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, date } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, date } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, tax, or expense' });
   }
@@ -235,6 +239,7 @@ export const create = async (req, res) => {
     category: (category || '').trim(),
     note: (note || '').trim(),
     supplierId: supplierId || null,
+    customerId: customerId || null,
     mazdoorId: mazdoorId || null,
     machineryPurchaseId: machineryPurchaseId || null,
     taxTypeId: taxTypeId || null,
@@ -246,6 +251,7 @@ export const create = async (req, res) => {
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
+    .populate('customerId', 'name')
     .populate('mazdoorId', 'name')
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
@@ -258,6 +264,7 @@ export const getById = async (req, res) => {
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
+    .populate('customerId', 'name')
     .populate('mazdoorId', 'name')
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')

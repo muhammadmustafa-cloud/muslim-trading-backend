@@ -33,7 +33,7 @@ function dateFilter(dateFrom, dateTo) {
  * Universal Daily Ledger — now strictly follows CASH FLOW using the Transaction model.
  */
 export const getDailyMemo = async (req, res) => {
-  const { dateFrom, dateTo } = req.query;
+  const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const fromStr = dateFrom || todayStr;
@@ -43,9 +43,18 @@ export const getDailyMemo = async (req, res) => {
   const toDate = new Date(toStr);
   toDate.setHours(23, 59, 59, 999);
 
+  const prevMatch = { date: { $lt: fromDate }, type: { $ne: 'accrual' } };
+  if (accountId) {
+    const id = new mongoose.Types.ObjectId(accountId);
+    prevMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
+  }
+  if (customerId) prevMatch.customerId = new mongoose.Types.ObjectId(customerId);
+  if (supplierId) prevMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
+  if (mazdoorId) prevMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+
   // 1. Calculate Opening Balance (Net flow before fromDate)
   const prevTransactions = await Transaction.aggregate([
-    { $match: { date: { $lt: fromDate }, type: { $ne: 'accrual' } } },
+    { $match: prevMatch },
     {
       $group: {
         _id: null,
@@ -59,11 +68,20 @@ export const getDailyMemo = async (req, res) => {
     ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) 
     : 0;
 
-  // 2. Fetch ALL Transactions in range (Accruals excluded)
-  const transactions = await Transaction.find({ 
+  const currMatch = {
     date: { $gte: fromDate, $lte: toDate },
     type: { $ne: 'accrual' }
-  })
+  };
+  if (accountId) {
+    const id = new mongoose.Types.ObjectId(accountId);
+    currMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
+  }
+  if (customerId) currMatch.customerId = new mongoose.Types.ObjectId(customerId);
+  if (supplierId) currMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
+  if (mazdoorId) currMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+
+  // 2. Fetch ALL Transactions in range (Accruals excluded)
+  const transactions = await Transaction.find(currMatch)
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
