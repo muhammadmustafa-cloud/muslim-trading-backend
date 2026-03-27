@@ -2,6 +2,8 @@ import Customer from '../models/Customer.js';
 import Supplier from '../models/Supplier.js';
 import Sale from '../models/Sale.js';
 import StockEntry from '../models/StockEntry.js';
+import Transaction from '../models/Transaction.js';
+import mongoose from 'mongoose';
 
 export const list = async (req, res) => {
   const search = (req.query.search || '').trim();
@@ -121,7 +123,7 @@ export const getHistory = async (req, res) => {
   if (stockMatch && hasDateFilter) stockMatch.date = dateFilter;
 
   // Transaction match: either linked to a sale of this customer, or directly to this customer
-  const Transaction = (await import('../models/Transaction.js')).default;
+  // Using global Transaction import
   const transMatch = { $or: [{ customerId: req.params.id }] };
   if (hasDateFilter) transMatch.date = dateFilter;
 

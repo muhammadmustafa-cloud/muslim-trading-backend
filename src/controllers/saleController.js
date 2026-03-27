@@ -1,6 +1,7 @@
 import Sale from '../models/Sale.js';
 import StockEntry from '../models/StockEntry.js';
 import Item from '../models/Item.js';
+import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 
 async function getAvailableQuantity(itemId, excludeSaleId = null) {
@@ -299,7 +300,7 @@ export const collectPayment = async (req, res) => {
     return res.status(400).json({ success: false, message: `Amount exceeds remaining balance of ${remaining}` });
   }
 
-  const Transaction = (await import('../models/Transaction.js')).default;
+  // Payment logic using global Transaction import
 
   const transaction = await Transaction.create({
     date: date ? new Date(date) : new Date(),
