@@ -3,11 +3,13 @@ import { config } from './config/index.js';
 import connectDB from './config/database.js';
 import logger from './utils/logger.js';
 import { seedDefaultAccounts } from './seed/defaultAccounts.js';
+import { seedAdminUser } from './seed/adminSeed.js';
 
 const startServer = async () => {
   try {
     await connectDB();
     await seedDefaultAccounts();
+    await seedAdminUser();
   } catch (error) {
     console.error('Database connection failed:', error.message);
     process.exit(1);
