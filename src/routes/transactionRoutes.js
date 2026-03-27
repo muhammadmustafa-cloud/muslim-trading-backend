@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler.js';
 import * as transactionController from '../controllers/transactionController.js';
+import { protect } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-router.get('/', asyncHandler(transactionController.list));
-router.get('/:id', asyncHandler(transactionController.getById));
-router.post('/', asyncHandler(transactionController.create));
+router.get('/', protect, asyncHandler(transactionController.list));
+router.get('/:id', protect, asyncHandler(transactionController.getById));
+router.post('/', protect, asyncHandler(transactionController.create));
 
 export default router;
