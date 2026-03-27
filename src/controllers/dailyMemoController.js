@@ -112,11 +112,10 @@ export const getDailyMemo = async (req, res) => {
     const type = t.type;
     const category = t.category || '';
     
+    // Party = only Customer or Supplier (NOT Mazdoor)
     let partyName = '';
     if (t.customerId) partyName = t.customerId.name;
     else if (t.supplierId) partyName = t.supplierId.name;
-    else if (t.mazdoorId) partyName = t.mazdoorId.name;
-    else partyName = category.replace('_', ' ').toUpperCase();
 
     // Build richer description
     let desc = '';
@@ -132,64 +131,37 @@ export const getDailyMemo = async (req, res) => {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
     } else if (t.taxTypeId) {
       desc = `Tax: ${t.taxTypeId.name}`;
-      partyName = 'Tax Payment';
     } else if (t.expenseTypeId) {
       desc = `Expense: ${t.expenseTypeId.name}`;
-      partyName = 'Expense Payment';
     } else if (category === 'mill_expense') {
       const cleanNote = (t.note || '').replace(/^Mill:\s*/i, '').replace(/^Mill expense\s*—\s*/i, '');
       desc = `Mill Expense | ${cleanNote || 'General'}`;
-      partyName = 'Mill Expense';
     } else if (category === 'mazdoor_expense') {
       desc = `Mazdoor Expense | ${t.note || 'General'}`;
-      partyName = partyName || 'Mazdoor Expense';
     } else {
       desc = t.note || category.replace('_', ' ');
-      partyName = partyName || 'General';
     }
 
     if (type === 'deposit') {
-      // Money into Bank, from Party
       rows.push({
-        type: category || 'deposit_in',
+        type: category || 'deposit',
         date: t.date,
-        name: t.toAccountId?.name || "Manual Account",
-        description: `Received from ${partyName}: ${desc}`,
-        accountName: t.toAccountId?.name || "Manual Account",
+        name: partyName || '',
+        description: desc,
+        accountName: t.toAccountId?.name || "Manual",
         amount: t.amount,
-        amountType: 'in', // IN to Bank
-        referenceId: t._id,
-      });
-      rows.push({
-        type: category || 'deposit_out',
-        date: t.date,
-        name: partyName,
-        description: `Paid to ${t.toAccountId?.name || "Manual Account"}: ${desc}`,
-        accountName: partyName,
-        amount: t.amount,
-        amountType: 'out', // OUT from Party
+        amountType: 'in',
         referenceId: t._id,
       });
     } else if (type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') {
-      // Money out of Bank, into Party
       rows.push({
-        type: category || type + '_out',
+        type: category || type,
         date: t.date,
-        name: t.fromAccountId?.name || "Manual Account",
-        description: `Paid to ${partyName}: ${desc}`,
-        accountName: t.fromAccountId?.name || "Manual Account",
+        name: partyName || '',
+        description: desc,
+        accountName: t.fromAccountId?.name || "Manual",
         amount: t.amount,
-        amountType: 'out', // OUT from Bank
-        referenceId: t._id,
-      });
-      rows.push({
-        type: category || type + '_in',
-        date: t.date,
-        name: partyName,
-        description: `Received from ${t.fromAccountId?.name || "Manual Account"}: ${desc}`,
-        accountName: partyName,
-        amount: t.amount,
-        amountType: 'in', // IN to Party
+        amountType: 'out',
         referenceId: t._id,
       });
     } else if (type === 'transfer') {
