@@ -137,14 +137,13 @@ export const getDailyMemo = async (req, res) => {
     } else if (t.machineryPurchaseId) {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
     } else if (t.taxTypeId) {
-      desc = `Tax: ${t.taxTypeId.name}`;
+      desc = 'Tax Payment';
     } else if (t.expenseTypeId) {
-      desc = `Expense: ${t.expenseTypeId.name}`;
+      desc = 'General Expense';
     } else if (category === 'mill_expense') {
-      const cleanNote = (t.note || '').replace(/^Mill:\s*/i, '').replace(/^Mill expense\s*—\s*/i, '');
-      desc = `Mill Expense | ${cleanNote || 'General'}`;
+      desc = 'Mill Expense';
     } else if (category === 'mazdoor_expense') {
-      desc = `Mazdoor Expense | ${t.note || 'General'}`;
+      desc = 'Mazdoor Expense';
     } else {
       desc = t.note || category.replace('_', ' ');
     }
