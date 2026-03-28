@@ -3,6 +3,7 @@ import StockEntry from '../models/StockEntry.js';
 import Transaction from '../models/Transaction.js';
 import MillExpense from '../models/MillExpense.js';
 import MazdoorExpense from '../models/MazdoorExpense.js';
+import mongoose from 'mongoose';
 
 /**
  * Build date filter for a single day or range.
@@ -112,10 +113,11 @@ export const getDailyMemo = async (req, res) => {
     const type = t.type;
     const category = t.category || '';
     
-    // Party = only Customer or Supplier (NOT Mazdoor)
+    // Party = only Customer or Supplier
     let partyName = '';
     if (t.customerId) partyName = t.customerId.name;
     else if (t.supplierId) partyName = t.supplierId.name;
+    const hasParty = !!partyName;
 
     // Build richer description
     let desc = '';
@@ -142,47 +144,81 @@ export const getDailyMemo = async (req, res) => {
       desc = t.note || category.replace('_', ' ');
     }
 
+    // Append payment method info
+    if (t.paymentMethod === 'cheque') {
+      desc += ` | Cheque #${t.chequeNumber || '—'}`;
+      if (t.chequeDate) desc += ` (${new Date(t.chequeDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })})`;
+    } else if (t.paymentMethod === 'online') {
+      desc += ' | Online';
+    }
+
     if (type === 'deposit') {
+      // Credit side: money came IN to account
       rows.push({
         type: category || 'deposit',
         date: t.date,
         name: partyName || '',
         description: desc,
-        accountName: t.toAccountId?.name || "Manual",
+        accountName: t.toAccountId?.name || 'Manual',
         amount: t.amount,
         amountType: 'in',
         referenceId: t._id,
       });
+      // If party involved → also show Debit side (party gave money)
+      if (hasParty) {
+        rows.push({
+          type: category || 'deposit',
+          date: t.date,
+          name: t.toAccountId?.name || 'Account',
+          description: desc,
+          accountName: partyName,
+          amount: t.amount,
+          amountType: 'out',
+          referenceId: t._id,
+        });
+      }
     } else if (type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') {
+      // Debit side: money went OUT from account
       rows.push({
         type: category || type,
         date: t.date,
         name: partyName || '',
         description: desc,
-        accountName: t.fromAccountId?.name || "Manual",
+        accountName: t.fromAccountId?.name || 'Manual',
         amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
       });
+      // If party involved → also show Credit side (party received money)
+      if (hasParty) {
+        rows.push({
+          type: category || type,
+          date: t.date,
+          name: t.fromAccountId?.name || 'Account',
+          description: desc,
+          accountName: partyName,
+          amount: t.amount,
+          amountType: 'in',
+          referenceId: t._id,
+        });
+      }
     } else if (type === 'transfer') {
-      // Transfer Out from sender Bank
       rows.push({
         type: 'transfer_out',
         date: t.date,
         name: t.fromAccountId?.name || 'Account',
         description: `Transfer to ${t.toAccountId?.name || '—'}`,
-        accountName: t.fromAccountId?.name || "Manual",
+        accountName: t.fromAccountId?.name || 'Manual',
         amount: t.amount,
         amountType: 'out',
         referenceId: t._id,
       });
-      // Transfer In to receiver Bank
       rows.push({
         type: 'transfer_in',
         date: t.date,
         name: t.toAccountId?.name || 'Account',
         description: `Transfer from ${t.fromAccountId?.name || '—'}`,
-        accountName: t.toAccountId?.name || "Manual",
+        accountName: t.toAccountId?.name || 'Manual',
         amount: t.amount,
         amountType: 'in',
         referenceId: t._id,

@@ -189,7 +189,7 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, date } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, tax, or expense' });
   }
@@ -201,17 +201,10 @@ export const create = async (req, res) => {
   if (type === 'deposit') {
     if (!toAccountId) return res.status(400).json({ success: false, message: 'toAccountId required for deposit' });
   }
-  const Account = (await import('../models/Account.js')).default;
   if (type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') {
     if (!fromAccountId) return res.status(400).json({ success: false, message: `fromAccountId required for ${type}` });
     if (type === 'tax' && !taxTypeId) return res.status(400).json({ success: false, message: 'taxTypeId required for tax payment' });
     if (type === 'expense' && !expenseTypeId) return res.status(400).json({ success: false, message: 'expenseTypeId required for expense' });
-    
-    const account = await Account.findById(fromAccountId).lean();
-    const totalBalance = (account?.openingBalance ?? 0) + (await getAccountBalance(fromAccountId));
-    if (totalBalance < amt) {
-      return res.status(400).json({ success: false, message: `Insufficient balance. Available: ${totalBalance}` });
-    }
   }
   if (type === 'salary') {
     if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for salary' });
@@ -219,15 +212,14 @@ export const create = async (req, res) => {
   if (type === 'transfer') {
     if (!fromAccountId || !toAccountId) return res.status(400).json({ success: false, message: 'fromAccountId and toAccountId required for transfer' });
     if (fromAccountId === toAccountId) return res.status(400).json({ success: false, message: 'Cannot transfer to same account' });
-    const account = await Account.findById(fromAccountId).lean();
-    const totalBalance = (account?.openingBalance ?? 0) + (await getAccountBalance(fromAccountId));
-    if (totalBalance < amt) {
-      return res.status(400).json({ success: false, message: `Insufficient balance. Available: ${totalBalance}` });
-    }
   }
   if (type === 'accrual') {
-    // Accruals for Mazdoor Salary/Earned don't require an account
     if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for accrual' });
+  }
+
+  // Validate cheque fields
+  if (paymentMethod === 'cheque' && !chequeNumber) {
+    return res.status(400).json({ success: false, message: 'Cheque number zaroori hai jab payment method cheque ho.' });
   }
 
   const transaction = await Transaction.create({
@@ -245,6 +237,9 @@ export const create = async (req, res) => {
     taxTypeId: taxTypeId || null,
     expenseTypeId: expenseTypeId || null,
     image: req.file ? req.file.filename : null,
+    paymentMethod: paymentMethod || 'cash',
+    chequeNumber: (chequeNumber || '').trim(),
+    chequeDate: chequeDate ? new Date(chequeDate) : null,
   });
 
   const populated = await Transaction.findById(transaction._id)

@@ -18,6 +18,9 @@ const transactionSchema = new mongoose.Schema(
     taxTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaxType', default: null },
     expenseTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExpenseType', default: null },
     image: { type: String, default: null },
+    paymentMethod: { type: String, enum: ['cash', 'online', 'cheque'], default: 'cash' },
+    chequeNumber: { type: String, trim: true, default: '' },
+    chequeDate: { type: Date, default: null },
   },
   { timestamps: true }
 );
