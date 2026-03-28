@@ -83,8 +83,8 @@ export const getDailyMemo = async (req, res) => {
 
   // 2. Fetch ALL Transactions in range (Accruals excluded)
   const transactions = await Transaction.find(currMatch)
-    .populate('fromAccountId', 'name')
-    .populate('toAccountId', 'name')
+    .populate('fromAccountId', 'name isDailyKhata isMillKhata')
+    .populate('toAccountId', 'name isDailyKhata isMillKhata')
     .populate('supplierId', 'name')
     .populate('customerId', 'name')
     .populate('mazdoorId', 'name')
@@ -107,6 +107,11 @@ export const getDailyMemo = async (req, res) => {
     .sort({ date: 1, createdAt: 1 })
     .lean();
   
+  // Helper: Mill Khata and Daily Khata are operational accounts —
+  // they record only the actual cash flow (single-entry), not the
+  // counter-entry for the party. All other accounts keep full double-entry.
+  const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
+
   const rows = [];
 
   transactions.forEach((t) => {
@@ -165,7 +170,8 @@ export const getDailyMemo = async (req, res) => {
         referenceId: t._id,
       });
       // If party involved → also show Debit side (party gave money)
-      if (hasParty) {
+      // Skip mirror row for operational accounts (Mill Khata / Daily Khata)
+      if (hasParty && !isOperationalAccount(t.toAccountId)) {
         rows.push({
           type: category || 'deposit',
           date: t.date,
@@ -190,7 +196,8 @@ export const getDailyMemo = async (req, res) => {
         referenceId: t._id,
       });
       // If party involved → also show Credit side (party received money)
-      if (hasParty) {
+      // Skip mirror row for operational accounts (Mill Khata / Daily Khata)
+      if (hasParty && !isOperationalAccount(t.fromAccountId)) {
         rows.push({
           type: category || type,
           date: t.date,
