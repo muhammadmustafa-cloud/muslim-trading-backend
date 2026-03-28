@@ -149,6 +149,23 @@ export const getDailyMemo = async (req, res) => {
       desc = t.note || category.replace('_', ' ');
     }
 
+    // Resolve a highly descriptive name for the primary column
+    let displayName = partyName;
+    if (!displayName) {
+      if (category === 'mill_expense') {
+        const cleanNote = (t.note || '').replace(/^Mill:\s*/i, '').replace(/^Mill expense\s*—\s*/i, '');
+        displayName = cleanNote || 'Mill Expense';
+      } else if (category === 'mazdoor_expense') {
+        displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : (t.note || 'Mazdoor Expense');
+      } else if (t.taxTypeId) {
+        displayName = t.taxTypeId.name || 'Tax Payment';
+      } else if (t.expenseTypeId) {
+        displayName = t.expenseTypeId.name || 'General Expense';
+      } else if (t.machineryPurchaseId) {
+        displayName = t.machineryPurchaseId.machineryItemId?.name || 'Machinery Item';
+      }
+    }
+
     // Append payment method info
     if (t.paymentMethod === 'cheque') {
       desc += ` | Cheque #${t.chequeNumber || '—'}`;
@@ -162,7 +179,7 @@ export const getDailyMemo = async (req, res) => {
       rows.push({
         type: category || 'deposit',
         date: t.date,
-        name: partyName || '',
+        name: displayName || '',
         description: desc,
         accountName: t.toAccountId?.name || 'Manual',
         amount: t.amount,
@@ -177,7 +194,7 @@ export const getDailyMemo = async (req, res) => {
           date: t.date,
           name: t.toAccountId?.name || 'Account',
           description: desc,
-          accountName: partyName,
+          accountName: displayName || partyName,
           amount: t.amount,
           amountType: 'out',
           referenceId: t._id,
@@ -188,7 +205,7 @@ export const getDailyMemo = async (req, res) => {
       rows.push({
         type: category || type,
         date: t.date,
-        name: partyName || '',
+        name: displayName || '',
         description: desc,
         accountName: t.fromAccountId?.name || 'Manual',
         amount: t.amount,
@@ -203,7 +220,7 @@ export const getDailyMemo = async (req, res) => {
           date: t.date,
           name: t.fromAccountId?.name || 'Account',
           description: desc,
-          accountName: partyName,
+          accountName: displayName || partyName,
           amount: t.amount,
           amountType: 'in',
           referenceId: t._id,
