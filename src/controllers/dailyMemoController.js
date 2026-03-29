@@ -205,13 +205,13 @@ export const getDailyMemo = async (req, res) => {
 
     if (type === 'deposit') {
       rows.push({ type: category || 'deposit', date: t.date, name: displayName, description: desc, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
-      if (hasParty && !isOperationalAccount(t.toAccountId)) {
-        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
+      if (!isOperationalAccount(t.toAccountId)) {
+        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
       }
     } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
       rows.push({ type: category || type, date: t.date, name: displayName, description: desc, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
-      if (hasParty && !isOperationalAccount(t.fromAccountId)) {
-        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
+      if (!isOperationalAccount(t.fromAccountId)) {
+        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
       }
     } else if (type === 'transfer') {
       rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });

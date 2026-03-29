@@ -52,6 +52,23 @@ export const getAuditSummary = async (req, res) => {
     const isPeriodAudit = !!(dateFrom || dateTo);
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
+    // Calculate Mill Opening Balance (Pichli Wasooli)
+    const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
+    const millAccIds = allMillAccs.map(a => a._id);
+    const baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+
+    const prevTransactions = await Transaction.aggregate([
+      { $match: { date: { $lt: fromDate }, type: { $ne: 'accrual' } } },
+      {
+        $group: {
+          _id: null,
+          totalIn: { $sum: { $cond: [{ $in: ['$toAccountId', millAccIds] }, '$amount', 0] } },
+          totalOut: { $sum: { $cond: [{ $in: ['$fromAccountId', millAccIds] }, '$amount', 0] } },
+        }
+      }
+    ]);
+    const openingBalance = baseOpeningBalance + (prevTransactions.length > 0 ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) : 0);
+
     // 1. Account Details (Global standing + Period Inflow/Outflow)
     const accountDetails = [];
     let totalCash = 0;
@@ -232,6 +249,7 @@ export const getAuditSummary = async (req, res) => {
     res.json({
       success: true,
       data: {
+        openingBalance,
         totalCash,
         totalReceivables: scenarioReceivables,
         totalPayables: scenarioPayables,

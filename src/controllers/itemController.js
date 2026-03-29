@@ -128,35 +128,59 @@ export const getKhata = async (req, res) => {
     ])
   ]);
 
-  // Standardize the shape for the frontend
-  const purchases = purchasesRaw.map(p => ({
-    ...p,
-    itemId: p.items.itemId,
-    kattay: p.items.kattay,
-    kgPerKata: p.items.kgPerKata,
-    receivedWeight: p.items.itemNetWeight,
-    shCut: p.items.shCut,
-    rate: p.items.rate,
-    amount: p.items.amount,
-    bardanaAmount: p.items.bardanaAmount,
-    supplierId: p.supplierDoc ? { _id: p.supplierDoc._id, name: p.supplierDoc.name } : null,
-    accountId: p.accountDoc ? { _id: p.accountDoc._id, name: p.accountDoc.name } : null
-  }));
+  // Standardize the shape for the frontend & Handle Weight Fallbacks
+  const purchases = purchasesRaw.map(p => {
+    const itm = p.items;
+    let weight = Number(itm.itemNetWeight) || 0;
+    const rateVal = Number(itm.rate) || 0;
+    const amt = Number(itm.amount) || 0;
 
-  const sales = salesRaw.map(s => ({
-    ...s,
-    itemId: s.items.itemId,
-    kattay: s.items.kattay,
-    kgPerKata: s.items.kgPerKata,
-    quantity: s.items.quantity,
-    shCut: s.items.shCut,
-    rate: s.items.rate,
-    totalAmount: s.items.totalAmount,
-    bardanaAmount: s.items.bardanaAmount,
-    mazdori: s.items.mazdori,
-    customerId: s.customerDoc ? { _id: s.customerDoc._id, name: s.customerDoc.name } : null,
-    accountId: s.accountDoc ? { _id: s.accountDoc._id, name: s.accountDoc.name } : null
-  }));
+    // Fallback: If weight is missing but rate/amount exist
+    if (weight === 0 && rateVal > 0 && amt > 0) {
+      weight = (amt / rateVal) * 40;
+    }
+
+    return {
+      ...p,
+      itemId: itm.itemId,
+      kattay: itm.kattay,
+      kgPerKata: itm.kgPerKata,
+      receivedWeight: weight,
+      shCut: itm.shCut,
+      rate: rateVal,
+      amount: amt,
+      bardanaAmount: itm.bardanaAmount,
+      supplierId: p.supplierDoc ? { _id: p.supplierDoc._id, name: p.supplierDoc.name } : null,
+      accountId: p.accountDoc ? { _id: p.accountDoc._id, name: p.accountDoc.name } : null
+    };
+  });
+
+  const sales = salesRaw.map(s => {
+    const itm = s.items;
+    let weight = Number(itm.quantity) || 0;
+    const rateVal = Number(itm.rate) || 0;
+    const totalAmt = Number(itm.totalAmount) || 0;
+
+    // Fallback: If weight is missing but rate/amount exist
+    if (weight === 0 && rateVal > 0 && totalAmt > 0) {
+      weight = (totalAmt / rateVal) * 40;
+    }
+
+    return {
+      ...s,
+      itemId: itm.itemId,
+      kattay: itm.kattay,
+      kgPerKata: itm.kgPerKata,
+      quantity: weight,
+      shCut: itm.shCut,
+      rate: rateVal,
+      totalAmount: totalAmt,
+      bardanaAmount: itm.bardanaAmount,
+      mazdori: itm.mazdori,
+      customerId: s.customerDoc ? { _id: s.customerDoc._id, name: s.customerDoc.name } : null,
+      accountId: s.accountDoc ? { _id: s.accountDoc._id, name: s.accountDoc.name } : null
+    };
+  });
 
   const salesWithItem = sales.map((s) => ({
     ...s,
@@ -187,6 +211,8 @@ export const getKhata = async (req, res) => {
       totalRevenue,
       totalBagsPurchased,
       totalBagsSold,
+      stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
+      stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
       totalMunPurchased,
       totalMunSold,
       profit,
