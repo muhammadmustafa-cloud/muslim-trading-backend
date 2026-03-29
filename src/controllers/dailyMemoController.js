@@ -3,6 +3,10 @@ import StockEntry from '../models/StockEntry.js';
 import Transaction from '../models/Transaction.js';
 import MillExpense from '../models/MillExpense.js';
 import MazdoorExpense from '../models/MazdoorExpense.js';
+import Account from '../models/Account.js';
+import Customer from '../models/Customer.js';
+import Supplier from '../models/Supplier.js';
+import Mazdoor from '../models/Mazdoor.js';
 import mongoose from 'mongoose';
 
 /**
@@ -24,14 +28,7 @@ function dateFilter(dateFrom, dateTo) {
 
 /**
  * GET /api/daily-memo
- * Universal Daily Ledger — aggregates ALL financial activity across the system.
- * Sources: Sales, Purchases (StockEntry), Transactions, Mill Expenses, Mazdoor Expenses.
- * Query: dateFrom, dateTo (default today).
- * Skips auto-generated transactions (those linked to stockEntryId or saleId) to avoid double-counting.
- */
-/**
- * GET /api/daily-memo
- * Universal Daily Ledger — now strictly follows CASH FLOW using the Transaction model.
+ * Universal Daily Ledger — strictly follows CASH FLOW using the Transaction model.
  */
 export const getDailyMemo = async (req, res) => {
   const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
@@ -53,21 +50,68 @@ export const getDailyMemo = async (req, res) => {
   if (supplierId) prevMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
   if (mazdoorId) prevMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
-  // 1. Calculate Opening Balance (Net flow before fromDate)
+  // 1. Calculate Opening Balance (Carry Forward)
+  let baseOpeningBalance = 0;
+  if (accountId) {
+    const acc = await Account.findById(accountId).lean();
+    baseOpeningBalance = acc?.openingBalance || 0;
+  } else if (customerId) {
+    const cust = await Customer.findById(customerId).lean();
+    baseOpeningBalance = cust?.openingBalance || 0;
+  } else if (supplierId) {
+    const sup = await Supplier.findById(supplierId).lean();
+    baseOpeningBalance = sup?.openingBalance || 0;
+  } else if (mazdoorId) {
+    const maz = await Mazdoor.findById(mazdoorId).lean();
+    baseOpeningBalance = maz?.openingBalance || 0;
+  } else {
+    const allAccs = await Account.find({}).lean();
+    baseOpeningBalance = allAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+  }
+
+  // Calculate Net Flow before fromDate
   const prevTransactions = await Transaction.aggregate([
     { $match: prevMatch },
     {
       $group: {
         _id: null,
-        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary', 'tax', 'expense']] }, '$amount', 0] } },
+        totalIn: { 
+          $sum: { 
+            $cond: [
+              { $or: [
+                { $and: [!!accountId, { $eq: ['$toAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $ne: ['$toAccountId', null] }] },
+                { $and: [!!customerId, { $eq: ['$type', 'deposit'] }] },
+                { $and: [!!supplierId, { $eq: ['$type', 'deposit'] }] },
+                { $and: [!!mazdoorId, { $eq: ['$category', 'salary_accrual'] }] },
+              ]}, 
+              '$amount', 
+              0 
+            ] 
+          } 
+        },
+        totalOut: { 
+          $sum: { 
+            $cond: [
+              { $or: [
+                { $and: [!!accountId, { $eq: ['$fromAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $ne: ['$fromAccountId', null] }] },
+                { $and: [!!customerId, { $eq: ['$type', 'withdraw'] }] },
+                { $and: [!!supplierId, { $eq: ['$type', 'withdraw'] }] },
+                { $and: [!!mazdoorId, { $in: ['$type', ['withdraw', 'salary']] }] },
+              ]}, 
+              '$amount', 
+              0 
+            ] 
+          } 
+        },
       }
     }
   ]);
 
-  const openingBalance = prevTransactions.length > 0 
+  const openingBalance = baseOpeningBalance + (prevTransactions.length > 0 
     ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) 
-    : 0;
+    : 0);
 
   const currMatch = {
     date: { $gte: fromDate, $lte: toDate },
@@ -81,7 +125,6 @@ export const getDailyMemo = async (req, res) => {
   if (supplierId) currMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
   if (mazdoorId) currMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
-  // 2. Fetch ALL Transactions in range (Accruals excluded)
   const transactions = await Transaction.find(currMatch)
     .populate('fromAccountId', 'name isDailyKhata isMillKhata')
     .populate('toAccountId', 'name isDailyKhata isMillKhata')
@@ -107,24 +150,15 @@ export const getDailyMemo = async (req, res) => {
     .sort({ date: 1, createdAt: 1 })
     .lean();
   
-  // Helper: Mill Khata and Daily Khata are operational accounts —
-  // they record only the actual cash flow (single-entry), not the
-  // counter-entry for the party. All other accounts keep full double-entry.
   const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
-
   const rows = [];
 
   transactions.forEach((t) => {
     const type = t.type;
     const category = t.category || '';
-    
-    // Party = only Customer or Supplier
-    let partyName = '';
-    if (t.customerId) partyName = t.customerId.name;
-    else if (t.supplierId) partyName = t.supplierId.name;
+    let partyName = (t.customerId?.name || t.supplierId?.name || '');
     const hasParty = !!partyName;
 
-    // Build richer description
     let desc = '';
     if (t.saleId) {
       const bill = t.saleId._id?.toString().slice(-6).toUpperCase() || '—';
@@ -136,131 +170,51 @@ export const getDailyMemo = async (req, res) => {
       desc = `Purchase — ${itemNames} (Bill: ${bill})`;
     } else if (t.machineryPurchaseId) {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
-    } else if (t.taxTypeId) {
-      desc = 'Tax Payment';
-    } else if (t.expenseTypeId) {
-      desc = 'General Expense';
-    } else if (category === 'mill_expense') {
-      desc = 'Mill Expense';
-    } else if (category === 'mazdoor_expense') {
-      desc = 'Mazdoor Expense';
-    } else {
-      desc = t.note || category.replace('_', ' ');
-    }
+    } else if (t.taxTypeId) desc = 'Tax Payment';
+    else if (t.expenseTypeId) desc = 'General Expense';
+    else if (category === 'mill_expense') desc = 'Mill Expense';
+    else if (category === 'mazdoor_expense') desc = 'Mazdoor Expense';
+    else desc = t.note || category.replace('_', ' ');
 
-    // Resolve a highly descriptive name for the primary column
     let displayName = partyName;
     if (!displayName) {
-      if (category === 'mill_expense') {
-        const cleanNote = (t.note || '').replace(/^Mill:\s*/i, '').replace(/^Mill expense\s*—\s*/i, '');
-        displayName = cleanNote || 'Mill Expense';
-      } else if (category === 'mazdoor_expense') {
-        displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : (t.note || 'Mazdoor Expense');
-      } else if (t.taxTypeId) {
-        displayName = t.taxTypeId.name || 'Tax Payment';
-      } else if (t.expenseTypeId) {
-        displayName = t.expenseTypeId.name || 'General Expense';
-      } else if (t.machineryPurchaseId) {
-        displayName = t.machineryPurchaseId.machineryItemId?.name || 'Machinery Item';
-      }
+      if (category === 'mill_expense') displayName = (t.note || '').replace(/^Mill:\s*/i, '') || 'Mill Expense';
+      else if (category === 'mazdoor_expense') displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : (t.note || 'Mazdoor Expense');
+      else if (t.taxTypeId) displayName = t.taxTypeId.name || 'Tax Payment';
+      else if (t.expenseTypeId) displayName = t.expenseTypeId.name || 'General Expense';
     }
 
-    // Append payment method info
-    if (t.paymentMethod === 'cheque') {
-      desc += ` | Cheque #${t.chequeNumber || '—'}`;
-      if (t.chequeDate) desc += ` (${new Date(t.chequeDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })})`;
-    } else if (t.paymentMethod === 'online') {
-      desc += ' | Online';
-    }
+    if (t.paymentMethod === 'cheque') desc += ` | Cheque #${t.chequeNumber || '—'}`;
+    else if (t.paymentMethod === 'online') desc += ' | Online';
 
     if (type === 'deposit') {
-      // Credit side: money came IN to account
-      rows.push({
-        type: category || 'deposit',
-        date: t.date,
-        name: displayName || '',
-        description: desc,
-        accountName: t.toAccountId?.name || 'Manual',
-        amount: t.amount,
-        amountType: 'in',
-        referenceId: t._id,
-      });
-      // If party involved → also show Debit side (party gave money)
-      // Skip mirror row for operational accounts (Mill Khata / Daily Khata)
+      rows.push({ type: category || 'deposit', date: t.date, name: displayName, description: desc, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', referenceId: t._id });
       if (hasParty && !isOperationalAccount(t.toAccountId)) {
-        rows.push({
-          type: category || 'deposit',
-          date: t.date,
-          name: t.toAccountId?.name || 'Account',
-          description: desc,
-          accountName: displayName || partyName,
-          amount: t.amount,
-          amountType: 'out',
-          referenceId: t._id,
-        });
+        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'out', referenceId: t._id });
       }
-    } else if (type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') {
-      // Debit side: money went OUT from account
-      rows.push({
-        type: category || type,
-        date: t.date,
-        name: displayName || '',
-        description: desc,
-        accountName: t.fromAccountId?.name || 'Manual',
-        amount: t.amount,
-        amountType: 'out',
-        referenceId: t._id,
-      });
-      // If party involved → also show Credit side (party received money)
-      // Skip mirror row for operational accounts (Mill Khata / Daily Khata)
+    } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
+      rows.push({ type: category || type, date: t.date, name: displayName, description: desc, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', referenceId: t._id });
       if (hasParty && !isOperationalAccount(t.fromAccountId)) {
-        rows.push({
-          type: category || type,
-          date: t.date,
-          name: t.fromAccountId?.name || 'Account',
-          description: desc,
-          accountName: displayName || partyName,
-          amount: t.amount,
-          amountType: 'in',
-          referenceId: t._id,
-        });
+        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'in', referenceId: t._id });
       }
     } else if (type === 'transfer') {
-      rows.push({
-        type: 'transfer_out',
-        date: t.date,
-        name: t.fromAccountId?.name || 'Account',
-        description: `Transfer to ${t.toAccountId?.name || '—'}`,
-        accountName: t.fromAccountId?.name || 'Manual',
-        amount: t.amount,
-        amountType: 'out',
-        referenceId: t._id,
-      });
-      rows.push({
-        type: 'transfer_in',
-        date: t.date,
-        name: t.toAccountId?.name || 'Account',
-        description: `Transfer from ${t.fromAccountId?.name || '—'}`,
-        accountName: t.toAccountId?.name || 'Manual',
-        amount: t.amount,
-        amountType: 'in',
-        referenceId: t._id,
-      });
+      rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', referenceId: t._id });
+      rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', referenceId: t._id });
     }
   });
 
-  const totalIn = rows.filter(r => r.amountType === 'in').reduce((s, r) => s + r.amount, 0);
-  const totalOut = rows.filter(r => r.amountType === 'out').reduce((s, r) => s + r.amount, 0);
+  const todayIn = rows.filter(r => r.amountType === 'in').reduce((s, r) => s + r.amount, 0);
+  const todayOut = rows.filter(r => r.amountType === 'out').reduce((s, r) => s + r.amount, 0);
 
   res.json({
     success: true,
     data: rows,
     summary: {
       openingBalance,
-      totalIn,
-      totalOut,
-      net: totalIn - totalOut,
-      closingBalance: openingBalance + totalIn - totalOut
+      totalIn: todayIn,
+      totalOut: todayOut,
+      net: todayIn - todayOut,
+      closingBalance: openingBalance + todayIn - todayOut
     },
   });
 };
