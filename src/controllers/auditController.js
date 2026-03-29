@@ -135,15 +135,39 @@ export const getAuditSummary = async (req, res) => {
     }).populate('machineryItemId', 'name').populate('supplierId', 'name').lean();
 
     // 6. Detailed Expenses & Taxes
-    const detailedExpenses = await Transaction.find({
-      date: { $gte: fromDate, $lte: toDate },
-      type: 'expense'
-    }).populate('expenseTypeId', 'name').lean();
+    // 7. Period Transactions for Audit Trail (Len Den Detail)
+    const periodTransactions = await Transaction.find({
+      date: { $gte: fromDate, $lte: toDate }
+    })
+    .populate('customerId', 'name')
+    .populate('supplierId', 'name')
+    .populate('mazdoorId', 'name')
+    .populate('fromAccountId', 'name')
+    .populate('toAccountId', 'name')
+    .populate('expenseTypeId', 'name')
+    .populate('taxTypeId', 'name')
+    .sort({ date: 1 })
+    .lean();
 
-    const detailedTaxes = await Transaction.find({
-      date: { $gte: fromDate, $lte: toDate },
-      type: 'tax'
-    }).populate('taxTypeId', 'name').lean();
+    const detailedExpenses = periodTransactions.filter(t => t.type === 'expense');
+    const detailedTaxes = periodTransactions.filter(t => t.type === 'tax');
+
+    // 8. STRICT FILER: Stay Hidden if No Activity in Range
+    // We identify who was active via Transactions, Sales, or Purchases
+    const activeSaleCustomerIds = (await Sale.find({ date: { $gte: fromDate, $lte: toDate } }).select('customerId')).map(s => s.customerId?.toString());
+    const activePurchaseSupplierIds = (await StockEntry.find({ date: { $gte: fromDate, $lte: toDate } }).select('supplierId')).map(s => s.supplierId?.toString());
+    
+    const activeTransCustomerIds = periodTransactions.map(t => t.customerId?._id?.toString()).filter(Boolean);
+    const activeTransSupplierIds = periodTransactions.map(t => t.supplierId?._id?.toString()).filter(Boolean);
+    const activeTransMazdoorIds = periodTransactions.map(t => t.mazdoorId?._id?.toString()).filter(Boolean);
+
+    const allActiveCustomerIds = new Set([...activeSaleCustomerIds, ...activeTransCustomerIds]);
+    const allActiveSupplierIds = new Set([...activePurchaseSupplierIds, ...activeTransSupplierIds]);
+    const allActiveMazdoorIds = new Set([...activeTransMazdoorIds]);
+
+    const filteredCustomers = detailedCustomers.filter(c => allActiveCustomerIds.has(c._id.toString()));
+    const filteredSuppliers = detailedSuppliers.filter(s => allActiveSupplierIds.has(s._id.toString()));
+    const filteredMazdoors = detailedMazdoors.filter(m => allActiveMazdoorIds.has(m._id.toString()));
 
     res.json({
       success: true,
@@ -154,14 +178,15 @@ export const getAuditSummary = async (req, res) => {
         totalStockValue,
         totalMachineryValue: machineryTotal[0]?.total || 0,
         
-        customers: detailedCustomers,
-        suppliers: detailedSuppliers,
-        mazdoors: detailedMazdoors,
+        customers: filteredCustomers,
+        suppliers: filteredSuppliers,
+        mazdoors: filteredMazdoors,
         stock: detailedStock,
         machinery: detailedMachinery,
         expenses: detailedExpenses,
         taxes: detailedTaxes,
-        accounts: accountDetails
+        accounts: accountDetails,
+        periodTransactions
       }
     });
 
