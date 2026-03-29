@@ -50,7 +50,12 @@ export const getDailyMemo = async (req, res) => {
   if (supplierId) prevMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
   if (mazdoorId) prevMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
-  // 1. Calculate Opening Balance (Carry Forward)
+  // 1. Identify "Mill Accounts" (Daily & Mill Khata)
+  const allMillAccs = await Account.find({ $or: [{ isDailyKhata: true }, { isMillKhata: true }] }).lean();
+  const millAccIds = allMillAccs.map(a => a._id.toString());
+  const millAccObjectIdIds = allMillAccs.map(a => a._id);
+
+  // 1. Calculate Base Opening Balance
   let baseOpeningBalance = 0;
   if (accountId) {
     const acc = await Account.findById(accountId).lean();
@@ -65,11 +70,12 @@ export const getDailyMemo = async (req, res) => {
     const maz = await Mazdoor.findById(mazdoorId).lean();
     baseOpeningBalance = maz?.openingBalance || 0;
   } else {
-    const allAccs = await Account.find({}).lean();
-    baseOpeningBalance = allAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+    // Full Mill Summary — sum all mill accounts' opening balances
+    baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
   }
 
-  // Calculate Net Flow before fromDate
+  // 2. Calculate Historical Cash Flow
+  // We determine what entered/left the "Mill Box" before today.
   const prevTransactions = await Transaction.aggregate([
     { $match: prevMatch },
     {
@@ -79,8 +85,11 @@ export const getDailyMemo = async (req, res) => {
           $sum: { 
             $cond: [
               { $or: [
+                // Case A: Specific Account selected + it is the recipient
                 { $and: [!!accountId, { $eq: ['$toAccountId', new mongoose.Types.ObjectId(accountId)] }] },
-                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $ne: ['$toAccountId', null] }] },
+                // Case B: Full Mill Summary + money entered ANY Mill Account
+                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ['$toAccountId', millAccObjectIdIds] }] },
+                // Case C: Party ledgers (money entering the party's ledger)
                 { $and: [!!customerId, { $eq: ['$type', 'deposit'] }] },
                 { $and: [!!supplierId, { $eq: ['$type', 'deposit'] }] },
                 { $and: [!!mazdoorId, { $eq: ['$category', 'salary_accrual'] }] },
@@ -94,8 +103,11 @@ export const getDailyMemo = async (req, res) => {
           $sum: { 
             $cond: [
               { $or: [
+                // Case A: Specific Account selected + it is the sender
                 { $and: [!!accountId, { $eq: ['$fromAccountId', new mongoose.Types.ObjectId(accountId)] }] },
-                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $ne: ['$fromAccountId', null] }] },
+                // Case B: Full Mill Summary + money left ANY Mill Account
+                { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ['$fromAccountId', millAccObjectIdIds] }] },
+                // Case C: Party ledgers (money leaving the party's ledger)
                 { $and: [!!customerId, { $eq: ['$type', 'withdraw'] }] },
                 { $and: [!!supplierId, { $eq: ['$type', 'withdraw'] }] },
                 { $and: [!!mazdoorId, { $in: ['$type', ['withdraw', 'salary']] }] },
@@ -151,6 +163,7 @@ export const getDailyMemo = async (req, res) => {
     .lean();
   
   const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
+  const isInternalTransfer = (t) => t.type === 'transfer' && isOperationalAccount(t.fromAccountId) && isOperationalAccount(t.toAccountId);
   const rows = [];
 
   transactions.forEach((t) => {
@@ -187,24 +200,28 @@ export const getDailyMemo = async (req, res) => {
     if (t.paymentMethod === 'cheque') desc += ` | Cheque #${t.chequeNumber || '—'}`;
     else if (t.paymentMethod === 'online') desc += ' | Online';
 
+    // Track "Master Totals" only for external cash flow
+    const isExternal = !isInternalTransfer(t);
+
     if (type === 'deposit') {
-      rows.push({ type: category || 'deposit', date: t.date, name: displayName, description: desc, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', referenceId: t._id });
+      rows.push({ type: category || 'deposit', date: t.date, name: displayName, description: desc, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
       if (hasParty && !isOperationalAccount(t.toAccountId)) {
-        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'out', referenceId: t._id });
+        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
       }
     } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
-      rows.push({ type: category || type, date: t.date, name: displayName, description: desc, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', referenceId: t._id });
+      rows.push({ type: category || type, date: t.date, name: displayName, description: desc, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
       if (hasParty && !isOperationalAccount(t.fromAccountId)) {
-        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'in', referenceId: t._id });
+        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName, amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
       }
     } else if (type === 'transfer') {
-      rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', referenceId: t._id });
-      rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', referenceId: t._id });
+      rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
+      rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
     }
   });
 
-  const todayIn = rows.filter(r => r.amountType === 'in').reduce((s, r) => s + r.amount, 0);
-  const todayOut = rows.filter(r => r.amountType === 'out').reduce((s, r) => s + r.amount, 0);
+  // Calculate clean summary excluding internal loop-backs
+  const todayIn = rows.filter(r => r.amountType === 'in' && r.isExternal).reduce((s, r) => s + r.amount, 0);
+  const todayOut = rows.filter(r => r.amountType === 'out' && r.isExternal).reduce((s, r) => s + r.amount, 0);
 
   res.json({
     success: true,
