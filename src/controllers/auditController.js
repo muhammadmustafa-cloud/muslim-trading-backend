@@ -52,29 +52,37 @@ export const getAuditSummary = async (req, res) => {
     const isPeriodAudit = !!(dateFrom || dateTo);
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
-    // 1. Account Details (Period Movement or Total)
+    // 1. Account Details (Global standing + Period Inflow/Outflow)
     const accountDetails = [];
     let totalCash = 0;
     for (const a of accounts) {
-      let balance = 0;
-      if (isPeriodAudit) {
-        // Show Net Movement for this period
-        const periodTrans = await Transaction.aggregate([
-          { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
-          { $group: {
-            _id: null,
-            totalIn: { $sum: { $cond: [{ $eq: ['$toAccountId', a._id] }, '$amount', 0] } },
-            totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
-          }}
-        ]);
-        balance = (periodTrans[0]?.totalIn || 0) - (periodTrans[0]?.totalOut || 0);
-      } else {
-        // Show Global Closing Balance
-        const flow = await getAccountBalance(a._id);
-        balance = (a.openingBalance ?? 0) + flow;
-      }
+      // Always get In/Out for the selected period
+      const periodTrans = await Transaction.aggregate([
+        { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
+        { $group: {
+          _id: null,
+          totalIn: { $sum: { $cond: [{ $eq: ['$toAccountId', a._id] }, '$amount', 0] } },
+          totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
+        }}
+      ]);
+
+      const tIn = periodTrans[0]?.totalIn || 0;
+      const tOut = periodTrans[0]?.totalOut || 0;
+
+      // Current Balance calculation (always global for cash assets)
+      const flow = await getAccountBalance(a._id);
+      const balance = (a.openingBalance ?? 0) + flow;
+
       totalCash += balance;
-      accountDetails.push({ name: a.name, balance });
+      accountDetails.push({ 
+        _id: a._id,
+        name: a.name, 
+        balance, 
+        totalIn: tIn, 
+        totalOut: tOut,
+        isDailyKhata: !!a.isDailyKhata,
+        isMillKhata: !!a.isMillKhata
+      });
     }
 
     // 2. Detailed Customer Balances (Scenario Mode)
