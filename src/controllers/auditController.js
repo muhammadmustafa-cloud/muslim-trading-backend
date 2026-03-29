@@ -49,18 +49,37 @@ export const getAuditSummary = async (req, res) => {
       Item.find({}).lean(),
     ]);
 
-    // 1. Account Details
+    const isPeriodAudit = !!(dateFrom || dateTo);
+    const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
+
+    // 1. Account Details (Period Movement or Total)
     const accountDetails = [];
     let totalCash = 0;
     for (const a of accounts) {
-      const flow = await getAccountBalance(a._id);
-      const balance = (a.openingBalance ?? 0) + flow;
+      let balance = 0;
+      if (isPeriodAudit) {
+        // Show Net Movement for this period
+        const periodTrans = await Transaction.aggregate([
+          { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
+          { $group: {
+            _id: null,
+            totalIn: { $sum: { $cond: [{ $eq: ['$toAccountId', a._id] }, '$amount', 0] } },
+            totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
+          }}
+        ]);
+        balance = (periodTrans[0]?.totalIn || 0) - (periodTrans[0]?.totalOut || 0);
+      } else {
+        // Show Global Closing Balance
+        const flow = await getAccountBalance(a._id);
+        balance = (a.openingBalance ?? 0) + flow;
+      }
       totalCash += balance;
       accountDetails.push({ name: a.name, balance });
     }
 
-    // 2. Detailed Customer Balances
+    // 2. Detailed Customer Balances (Scenario Mode)
     const customerBalances = await Transaction.aggregate([
+      { $match: { ...(isPeriodAudit ? activityMatch : {}), customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
@@ -68,21 +87,24 @@ export const getAuditSummary = async (req, res) => {
       } }
     ]);
     const salesAgg = await Sale.aggregate([
+       { $match: (isPeriodAudit ? activityMatch : {}) },
        { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
     ]);
 
     const detailedCustomers = customers.map(c => {
       const trans = customerBalances.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
       const sales = salesAgg.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
-      const balance = (c.openingBalance || 0) + sales.total - trans.totalIn + trans.totalOut;
+      const opening = isPeriodAudit ? 0 : (c.openingBalance || 0);
+      const balance = opening + sales.total - trans.totalIn + trans.totalOut;
       return { _id: c._id, name: c.name, balance, phone: c.phone || '' };
     }).sort((a, b) => b.balance - a.balance);
 
     const totalReceivables = detailedCustomers.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0);
     const totalCustomerPayables = detailedCustomers.filter(c => c.balance < 0).reduce((sum, c) => sum + Math.abs(c.balance), 0);
 
-    // 3. Detailed Supplier Balances
+    // 3. Detailed Supplier Balances (Scenario Mode)
     const supplierTrans = await Transaction.aggregate([
+      { $match: { ...(isPeriodAudit ? activityMatch : {}), supplierId: { $ne: null } } },
       { $group: { 
         _id: '$supplierId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
@@ -90,24 +112,23 @@ export const getAuditSummary = async (req, res) => {
       } }
     ]);
     const purchaseAgg = await StockEntry.aggregate([
+      { $match: (isPeriodAudit ? activityMatch : {}) },
       { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
     ]);
 
     const detailedSuppliers = suppliers.map(s => {
       const trans = supplierTrans.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
       const purchases = purchaseAgg.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
-      // Sign convention aligned with supplierController.getHistory:
-      // balance = opening + payments(Dr) - purchases(Cr) - deposits
-      // Positive = they owe us (advance/overpaid), Negative = we owe them (payable)
-      const balance = (s.openingBalance || 0) - purchases.total + trans.totalOut - trans.totalIn;
+      const opening = isPeriodAudit ? 0 : (s.openingBalance || 0);
+      const balance = opening - purchases.total + trans.totalOut - trans.totalIn;
       return { _id: s._id, name: s.name, balance, phone: s.phone || '' };
     }).sort((a, b) => a.balance - b.balance);
 
     const totalSupplierPayables = detailedSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0);
 
-    // 4. Detailed Mazdoor Balances
+    // 4. Detailed Mazdoor Balances (Scenario Mode)
     const mazdoorStats = await Transaction.aggregate([
-      { $match: { mazdoorId: { $ne: null } } },
+      { $match: { ...(isPeriodAudit ? activityMatch : {}), mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
         paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
@@ -134,8 +155,33 @@ export const getAuditSummary = async (req, res) => {
       date: { $gte: fromDate, $lte: toDate } 
     }).populate('machineryItemId', 'name').populate('supplierId', 'name').lean();
 
-    // 6. Detailed Expenses & Taxes
-    // 7. Period Transactions for Audit Trail (Len Den Detail)
+    // 6. Item-Wise Movement Aggregations (Purchases and Sales)
+    const [itemPurchaseAgg, itemSaleAgg] = await Promise.all([
+      StockEntry.aggregate([
+        { $match: activityMatch },
+        { $unwind: '$items' },
+        { $group: { _id: '$items.itemId', totalPurchase: { $sum: '$items.amount' } } }
+      ]),
+      Sale.aggregate([
+        { $match: activityMatch },
+        { $unwind: '$items' },
+        { $group: { _id: '$items.itemId', totalSale: { $sum: '$items.totalAmount' } } }
+      ])
+    ]);
+
+    const detailedItems = allItems.map(item => {
+      const p = itemPurchaseAgg.find(x => x._id?.toString() === item._id.toString()) || { totalPurchase: 0 };
+      const s = itemSaleAgg.find(x => x._id?.toString() === item._id.toString()) || { totalSale: 0 };
+      return {
+        _id: item._id,
+        name: item.name,
+        purchaseVolume: p.totalPurchase,
+        saleVolume: s.totalSale
+      };
+    }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0);
+
+    // 7. Detailed Expenses & Taxes
+    // 8. Period Transactions for Audit Trail (Len Den Detail)
     const periodTransactions = await Transaction.find({
       date: { $gte: fromDate, $lte: toDate }
     })
@@ -169,12 +215,18 @@ export const getAuditSummary = async (req, res) => {
     const filteredSuppliers = detailedSuppliers.filter(s => allActiveSupplierIds.has(s._id.toString()));
     const filteredMazdoors = detailedMazdoors.filter(m => allActiveMazdoorIds.has(m._id.toString()));
 
+    // Recalculate totals based on filtered set for strict Period Scenario alignment
+    const scenarioReceivables = filteredCustomers.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0);
+    const scenarioPayables = (filteredCustomers.filter(c => c.balance < 0).reduce((sum, c) => sum + Math.abs(c.balance), 0)) +
+                             (filteredSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0)) +
+                             (filteredMazdoors.filter(m => m.balance > 0).reduce((sum, m) => sum + m.balance, 0));
+
     res.json({
       success: true,
       data: {
         totalCash,
-        totalReceivables,
-        totalPayables: totalCustomerPayables + totalSupplierPayables + totalMazdoorPayables,
+        totalReceivables: scenarioReceivables,
+        totalPayables: scenarioPayables,
         totalStockValue,
         totalMachineryValue: machineryTotal[0]?.total || 0,
         
@@ -186,6 +238,7 @@ export const getAuditSummary = async (req, res) => {
         expenses: detailedExpenses,
         taxes: detailedTaxes,
         accounts: accountDetails,
+        items: detailedItems,
         periodTransactions
       }
     });
