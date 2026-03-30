@@ -163,7 +163,14 @@ export const getAuditSummary = async (req, res) => {
     const detailedMazdoors = mazdoors.map(m => {
       const stat = mazdoorStats.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
       const balance = stat.earned - stat.paid;
-      return { _id: m._id, name: m.name, balance, contact: m.contact || '' };
+      return { 
+        _id: m._id, 
+        name: m.name, 
+        balance, 
+        earned: stat.earned, 
+        paid: stat.paid,
+        contact: m.contact || '' 
+      };
     }).sort((a, b) => b.balance - a.balance);
 
     const totalMazdoorPayables = detailedMazdoors.filter(m => m.balance > 0).reduce((sum, m) => sum + m.balance, 0);
