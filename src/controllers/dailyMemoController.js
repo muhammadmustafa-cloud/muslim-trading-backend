@@ -204,6 +204,10 @@ export const getDailyMemo = async (req, res) => {
     const isExternal = !isInternalTransfer(t);
 
     if (type === 'deposit') {
+      const isBankDest = t.toAccountId?.type === 'Bank';
+      const accountAmountType = isBankDest ? 'out' : 'in'; // Bank Deposit = Money leaving box (Kharch), Cash Deposit = Aamad
+      const partyAmountType = isBankDest ? 'in' : 'out'; // If giving to bank (Kharch), the "Source" is Aamad? No, usually symmetric.
+
       // 1. Primary Move: Money enters the Account (Credit/Aamad from Shop perspective)
       rows.push({ 
         type: category || 'deposit', 
@@ -212,7 +216,7 @@ export const getDailyMemo = async (req, res) => {
         description: desc, 
         accountName: displayName || 'Manual', 
         amount: t.amount, 
-        amountType: 'in', 
+        amountType: accountAmountType, 
         isExternal, 
         referenceId: t._id 
       });
@@ -226,12 +230,15 @@ export const getDailyMemo = async (req, res) => {
           description: desc, 
           accountName: t.toAccountId?.name || 'Manual', 
           amount: t.amount, 
-          amountType: 'out', 
+          amountType: isBankDest ? 'in' : 'out', 
           isExternal, 
           referenceId: t._id 
         });
       }
     } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
+      const isBankSource = t.fromAccountId?.type === 'Bank';
+      const accountAmountType = isBankSource ? 'in' : 'out'; // Bank Withdraw = Money entering box (Aamad), Cash Payment = Kharch
+
       // 1. Primary Move: Money leaves the Account (Debit/Kharch from Shop perspective)
       rows.push({ 
         type: category || type, 
@@ -240,7 +247,7 @@ export const getDailyMemo = async (req, res) => {
         description: desc, 
         accountName: displayName || 'Manual', 
         amount: t.amount, 
-        amountType: 'out', 
+        amountType: accountAmountType, 
         isExternal, 
         referenceId: t._id 
       });
