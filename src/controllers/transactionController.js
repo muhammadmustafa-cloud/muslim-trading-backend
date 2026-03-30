@@ -9,14 +9,16 @@ import mongoose from 'mongoose';
  * Returns net flow for account: (sales + deposits in + transfers in) − (withdrawals + transfers out).
  * Full balance = openingBalance + getAccountBalance(accountId).
  */
-async function getAccountBalance(accountId) {
+async function getAccountBalance(accountId, asOfDate) {
   if (!accountId) return 0;
   const id = new mongoose.Types.ObjectId(accountId);
+  const dateMatch = asOfDate ? { date: { $lte: new Date(asOfDate) } } : {};
+
   const [depositIn, transferIn, withdrawOut, transferOut] = await Promise.all([
-    Transaction.aggregate([{ $match: { type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { type: { $in: ['withdraw', 'salary', 'tax', 'expense'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { ...dateMatch, type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { ...dateMatch, type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { ...dateMatch, type: { $in: ['withdraw', 'salary', 'tax', 'expense'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { ...dateMatch, type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
   ]);
   const credits = (depositIn[0]?.total ?? 0) + (transferIn[0]?.total ?? 0);
   const debits = (withdrawOut[0]?.total ?? 0) + (transferOut[0]?.total ?? 0);

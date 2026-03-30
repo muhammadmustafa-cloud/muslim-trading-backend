@@ -14,9 +14,10 @@ export const getAuditSummary = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
     
-    const fromDate = dateFrom ? new Date(dateFrom) : new Date(0);
-    const toDate = dateTo ? new Date(dateTo) : new Date();
-    toDate.setHours(23, 59, 59, 999);
+    // Strict Date Boundary Fix (Forcing absolute start/end of local calendar day)
+    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : new Date(0);
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999`) : new Date();
+    if (!dateTo) toDate.setHours(23, 59, 59, 999);
 
     const [
       accounts,
@@ -86,8 +87,8 @@ export const getAuditSummary = async (req, res) => {
       const tIn = periodTrans[0]?.totalIn || 0;
       const tOut = periodTrans[0]?.totalOut || 0;
 
-      // Current Balance calculation (always global for cash assets)
-      const flow = await getAccountBalance(a._id);
+      // Point-in-Time Balance calculation (Snapshot as of toDate)
+      const flow = await getAccountBalance(a._id, toDate);
       const balance = (a.openingBalance ?? 0) + flow;
 
       totalCash += balance;
@@ -102,58 +103,59 @@ export const getAuditSummary = async (req, res) => {
       });
     }
 
-    // 2. Detailed Customer Balances (Scenario Mode)
-    const customerBalances = await Transaction.aggregate([
-      { $match: { ...(isPeriodAudit ? activityMatch : {}), customerId: { $ne: null } } },
+    // 2. Detailed Customer Balances (Point-in-Time Snapshot)
+    const snapshotMatch = { date: { $lte: toDate } };
+    
+    const customerTransactions = await Transaction.aggregate([
+      { $match: { ...snapshotMatch, customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
         totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
       } }
     ]);
-    const salesAgg = await Sale.aggregate([
-       { $match: (isPeriodAudit ? activityMatch : {}) },
+    const customerSales = await Sale.aggregate([
+       { $match: snapshotMatch },
        { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
     ]);
 
     const detailedCustomers = customers.map(c => {
-      const trans = customerBalances.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const sales = salesAgg.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
-      const opening = isPeriodAudit ? 0 : (c.openingBalance || 0);
-      const balance = opening + sales.total - trans.totalIn + trans.totalOut;
+      const trans = customerTransactions.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const sales = customerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
+      // Always use opening balance for master audit snapshot
+      const balance = (c.openingBalance || 0) + sales.total - trans.totalIn + trans.totalOut;
       return { _id: c._id, name: c.name, balance, phone: c.phone || '' };
     }).sort((a, b) => b.balance - a.balance);
 
     const totalReceivables = detailedCustomers.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0);
     const totalCustomerPayables = detailedCustomers.filter(c => c.balance < 0).reduce((sum, c) => sum + Math.abs(c.balance), 0);
 
-    // 3. Detailed Supplier Balances (Scenario Mode)
-    const supplierTrans = await Transaction.aggregate([
-      { $match: { ...(isPeriodAudit ? activityMatch : {}), supplierId: { $ne: null } } },
+    // 3. Detailed Supplier Balances (Point-in-Time Snapshot)
+    const supplierTransactions = await Transaction.aggregate([
+      { $match: { ...snapshotMatch, supplierId: { $ne: null } } },
       { $group: { 
         _id: '$supplierId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
         totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
       } }
     ]);
-    const purchaseAgg = await StockEntry.aggregate([
-      { $match: (isPeriodAudit ? activityMatch : {}) },
+    const supplierPurchases = await StockEntry.aggregate([
+      { $match: snapshotMatch },
       { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
     ]);
 
     const detailedSuppliers = suppliers.map(s => {
-      const trans = supplierTrans.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const purchases = purchaseAgg.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
-      const opening = isPeriodAudit ? 0 : (s.openingBalance || 0);
-      const balance = opening - purchases.total + trans.totalOut - trans.totalIn;
+      const trans = supplierTransactions.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const purchases = supplierPurchases.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
+      const balance = (s.openingBalance || 0) - purchases.total + trans.totalOut - trans.totalIn;
       return { _id: s._id, name: s.name, balance, phone: s.phone || '' };
     }).sort((a, b) => a.balance - b.balance);
 
     const totalSupplierPayables = detailedSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0);
 
-    // 4. Detailed Mazdoor Balances (Scenario Mode)
-    const mazdoorStats = await Transaction.aggregate([
-      { $match: { ...(isPeriodAudit ? activityMatch : {}), mazdoorId: { $ne: null } } },
+    // 4. Detailed Mazdoor Balances (Point-in-Time Snapshot)
+    const mazdoorTransactions = await Transaction.aggregate([
+      { $match: { ...snapshotMatch, mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
         paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
@@ -161,7 +163,7 @@ export const getAuditSummary = async (req, res) => {
       }}
     ]);
     const detailedMazdoors = mazdoors.map(m => {
-      const stat = mazdoorStats.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
+      const stat = mazdoorTransactions.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
       const balance = stat.earned - stat.paid;
       return { 
         _id: m._id, 
