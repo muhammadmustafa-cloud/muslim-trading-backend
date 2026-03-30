@@ -109,24 +109,23 @@ export const create = async (req, res) => {
   const cutTotal = Number(totalSHCut) || 0;
   const netTotal = Math.max(0, grossTotal - cutTotal);
 
+  // Pre-calculate sum of line weights for accurate proportional splitting
+  const sumLineGross = items.reduce((sum, item) => {
+    const k = Number(item.kattay) || 0;
+    const kpk = Number(item.kgPerKata) || 0;
+    return sum + ((k * kpk) || Number(item.grossWeight) || 0);
+  }, 0);
+
   let grandTotalAmount = 0;
-  
-  // Process each item
   const processedItems = items.map(item => {
     const k = Number(item.kattay) || 0;
     const kpk = Number(item.kgPerKata) || 0;
     
     // Line Gross logic: if manual grossWeight provided use it, otherwise k * kpk
-    let lineGross = Number(item.grossWeight) || (k * kpk);
+    const lineGross = Number(item.grossWeight) || (k * kpk);
     
-    // If there is only ONE item, we force its gross to match the master totalGrossWeight 
-    // to prevent any tiny decimal or rounding mismatches.
-    if (items.length === 1 && grossTotal > 0) {
-      lineGross = grossTotal;
-    }
-    
-    // Proportional SH Cut splitting
-    const lineSHCut = grossTotal > 0 ? (lineGross / grossTotal) * cutTotal : 0;
+    // Proportional SH Cut splitting based on ACTUAL line weights sum
+    const lineSHCut = sumLineGross > 0 ? (lineGross / sumLineGross) * cutTotal : 0;
     const lineNet = Math.max(0, lineGross - lineSHCut);
     
     const bRate = Number(item.bardanaRate) || 0;
@@ -239,18 +238,19 @@ export const update = async (req, res) => {
   sale.netWeight = Math.max(0, grossTotal - cutTotal);
 
   if (items && Array.isArray(items)) {
+    const sumLineGross = items.reduce((sum, item) => {
+      const k = Number(item.kattay) || 0;
+      const kpk = Number(item.kgPerKata) || 0;
+      return sum + ((k * kpk) || Number(item.grossWeight) || 0);
+    }, 0);
+
     let grandTotalAmount = 0;
     sale.items = items.map(item => {
       const k = Number(item.kattay) || 0;
       const kpk = Number(item.kgPerKata) || 0;
-      let lineGross = Number(item.grossWeight) || (k * kpk);
+      const lineGross = Number(item.grossWeight) || (k * kpk);
       
-      // Sync master weight if single item
-      if (items.length === 1 && grossTotal > 0) {
-        lineGross = grossTotal;
-      }
-
-      const lineSHCut = grossTotal > 0 ? (lineGross / grossTotal) * cutTotal : 0;
+      const lineSHCut = sumLineGross > 0 ? (lineGross / sumLineGross) * cutTotal : 0;
       const lineNet = Math.max(0, lineGross - lineSHCut);
       
       const bRate = Number(item.bardanaRate) || 0;
