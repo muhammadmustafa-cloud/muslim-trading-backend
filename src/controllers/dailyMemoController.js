@@ -204,16 +204,63 @@ export const getDailyMemo = async (req, res) => {
     const isExternal = !isInternalTransfer(t);
 
     if (type === 'deposit') {
-      rows.push({ type: category || 'deposit', date: t.date, name: displayName, description: desc, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
-      if (!isOperationalAccount(t.toAccountId)) {
-        rows.push({ type: category || 'deposit', date: t.date, name: t.toAccountId?.name || 'Account', description: desc, accountName: displayName || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
+      // 1. Primary Move: Money enters the Account (Credit/Aamad from Shop perspective)
+      rows.push({ 
+        type: category || 'deposit', 
+        date: t.date, 
+        name: t.toAccountId?.name || 'Account', 
+        description: desc, 
+        accountName: displayName || 'Manual', 
+        amount: t.amount, 
+        amountType: 'in', 
+        isExternal, 
+        referenceId: t._id 
+      });
+
+      // 2. Contra Move: Money received from Participant (Debit/Kharch) - ONLY if participant exists
+      if (hasParty) {
+        rows.push({ 
+          type: category || 'deposit', 
+          date: t.date, 
+          name: displayName, 
+          description: desc, 
+          accountName: t.toAccountId?.name || 'Manual', 
+          amount: t.amount, 
+          amountType: 'out', 
+          isExternal, 
+          referenceId: t._id 
+        });
       }
     } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
-      rows.push({ type: category || type, date: t.date, name: displayName, description: desc, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
-      if (!isOperationalAccount(t.fromAccountId)) {
-        rows.push({ type: category || type, date: t.date, name: t.fromAccountId?.name || 'Account', description: desc, accountName: displayName || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
+      // 1. Primary Move: Money leaves the Account (Debit/Kharch from Shop perspective)
+      rows.push({ 
+        type: category || type, 
+        date: t.date, 
+        name: t.fromAccountId?.name || 'Account', 
+        description: desc, 
+        accountName: displayName || 'Manual', 
+        amount: t.amount, 
+        amountType: 'out', 
+        isExternal, 
+        referenceId: t._id 
+      });
+
+      // 2. Contra Move: Money paid to Participant (Credit/Aamad) - ONLY if participant exists
+      if (hasParty) {
+        rows.push({ 
+          type: category || type, 
+          date: t.date, 
+          name: displayName, 
+          description: desc, 
+          accountName: t.fromAccountId?.name || 'Manual', 
+          amount: t.amount, 
+          amountType: 'in', 
+          isExternal, 
+          referenceId: t._id 
+        });
       }
     } else if (type === 'transfer') {
+      // Internal transfers always show Aamne-Samne (Out from one, In to another)
       rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
       rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
     }
