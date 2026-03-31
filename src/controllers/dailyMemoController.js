@@ -138,7 +138,7 @@ export const getDailyMemo = async (req, res) => {
   if (mazdoorId) currMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
   const transactions = await Transaction.find(currMatch)
-    .populate('fromAccountId', 'name isDailyKhata isMillKhata')
+    .populate('fromAccountId', 'name type isDailyKhata isMillKhata')
     .populate('toAccountId', 'name isDailyKhata isMillKhata')
     .populate('supplierId', 'name')
     .populate('customerId', 'name')
@@ -195,6 +195,7 @@ export const getDailyMemo = async (req, res) => {
     if (!displayName) {
       if (category === 'mill_expense') displayName = (t.note || '').replace(/^Mill:\s*/i, '') || 'Mill Expense';
       else if (category === 'mazdoor_expense') displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : (t.note || 'Mazdoor Expense');
+      else if (t.mazdoorId) displayName = t.mazdoorId.name || 'Mazdoor';
       else if (t.taxTypeId) displayName = t.taxTypeId.name || 'Tax Payment';
       else if (t.expenseTypeId) displayName = t.expenseTypeId.name || 'General Expense';
       else if (t.rawMaterialHeadId) displayName = t.rawMaterialHeadId.name || 'Raw Material';
@@ -240,7 +241,6 @@ export const getDailyMemo = async (req, res) => {
       }
     } else if (['withdraw', 'salary', 'tax', 'expense'].includes(type)) {
       const isBankSource = t.fromAccountId?.type === 'Bank';
-      const accountAmountType = isBankSource ? 'in' : 'out'; // Bank Withdraw = Money entering box (Aamad), Cash Payment = Kharch
 
       // 1. Primary Move: Money leaves the Account (Debit/Kharch from Shop perspective)
       rows.push({ 
@@ -250,13 +250,16 @@ export const getDailyMemo = async (req, res) => {
         description: desc, 
         accountName: displayName || 'Manual', 
         amount: t.amount, 
-        amountType: accountAmountType, 
+        amountType: 'out', // Account pays = Kharch (Debit side)
         isExternal, 
         referenceId: t._id 
       });
 
-      // 2. Contra Move: Money paid to Participant (Credit/Aamad) - ONLY if participant exists
-      if (hasParty) {
+      // 2. Contra Move (Aamne-Samne): opposite side of the transaction
+      // For Cash/Mill accounts: only when customer/supplier party exists (existing behavior)
+      // For Bank accounts: always generate contra for Tax/Expense/Salary/Mazdoor
+      const shouldContra = hasParty || (isBankSource && displayName);
+      if (shouldContra) {
         rows.push({ 
           type: category || type, 
           date: t.date, 
@@ -264,7 +267,7 @@ export const getDailyMemo = async (req, res) => {
           description: desc, 
           accountName: t.fromAccountId?.name || 'Manual', 
           amount: t.amount, 
-          amountType: 'in', 
+          amountType: 'in', // Recipient receives = Aamad (Credit side)
           isExternal, 
           referenceId: t._id 
         });
