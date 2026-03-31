@@ -535,7 +535,7 @@ export const getConsolidatedLedgers = async (req, res) => {
       const trans = activeTrans.filter(t => t.fromAccountId?.toString() === aId || t.toAccountId?.toString() === aId);
       const ledger = trans.map(t => {
         const isIn = t.toAccountId?.toString() === aId;
-        return { date: t.date, description: t.note || (isIn ? 'Inflow' : 'Outflow'), debit: !isIn ? t.amount : 0, credit: isIn ? t.amount : 0 };
+        return { date: t.date, description: t.note || (isIn ? 'Inflow' : 'Outflow'), debit: isIn ? t.amount : 0, credit: !isIn ? t.amount : 0 };
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.accounts.push({ name: party.name, openingBalance: op, ledger });
