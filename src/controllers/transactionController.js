@@ -43,7 +43,7 @@ function buildDateFilter(dateFrom, dateTo) {
 }
 
 export const list = async (req, res) => {
-  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified } = req.query;
+  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified, rawMaterialHeadId } = req.query;
   const includeSalesAndStock = unified === 'true' || unified === '1';
 
   if (includeSalesAndStock) {
@@ -56,6 +56,7 @@ export const list = async (req, res) => {
         if (id) filter.$or = [{ fromAccountId: id }, { toAccountId: id }];
         if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
         else if (mazdoorOnly === 'true' || mazdoorOnly === true) filter.mazdoorId = { $ne: null };
+        if (rawMaterialHeadId) filter.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
         return Transaction.find(filter)
           .populate('fromAccountId', 'name')
           .populate('toAccountId', 'name')
@@ -71,6 +72,7 @@ export const list = async (req, res) => {
           .lean();
       })(),
       (() => {
+        if (rawMaterialHeadId) return []; // Raw Material filtering is only for transactions
         const filter = { ...dateF, amountReceived: { $gt: 0 } };
         if (id) filter.accountId = id;
         return Sale.find(filter)
@@ -81,6 +83,7 @@ export const list = async (req, res) => {
           .lean();
       })(),
       (() => {
+        if (rawMaterialHeadId) return []; // Raw Material filtering is only for transactions
         const filter = { ...dateF, $or: [{ amountPaid: { $gt: 0 } }, { amount: { $gt: 0 } }] };
         if (id) filter.accountId = id;
         return StockEntry.find(filter)
@@ -172,6 +175,9 @@ export const list = async (req, res) => {
     filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
   } else if (mazdoorOnly === 'true' || mazdoorOnly === true) {
     filter.mazdoorId = { $ne: null };
+  }
+  if (rawMaterialHeadId) {
+    filter.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
   }
   filter.type = { $ne: 'accrual' };
   if (dateFrom || dateTo) {
