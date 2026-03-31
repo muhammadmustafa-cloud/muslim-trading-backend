@@ -21,6 +21,7 @@ import expenseTypeRoutes from './expenseTypeRoutes.js';
 import authRoutes from './authRoutes.js';
 import auditRoutes from './auditRoutes.js';
 import userRoutes from './userRoutes.js';
+import rawMaterialHeadRoutes from './rawMaterialHeadRoutes.js';
 
 const router = Router();
 
@@ -46,6 +47,7 @@ router.use('/expense-types', expenseTypeRoutes);
 router.use('/audit', auditRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/raw-material-heads', rawMaterialHeadRoutes);
 
 // Base API info
 router.get('/', (req, res) => {

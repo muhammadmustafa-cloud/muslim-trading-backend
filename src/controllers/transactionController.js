@@ -66,6 +66,7 @@ export const list = async (req, res) => {
           .populate('saleId')
           .populate('taxTypeId', 'name')
           .populate('expenseTypeId', 'name')
+          .populate('rawMaterialHeadId', 'name')
           .sort({ date: -1 })
           .lean();
       })(),
@@ -114,6 +115,8 @@ export const list = async (req, res) => {
         taxTypeName: t.taxTypeId?.name || '',
         expenseTypeId: t.expenseTypeId,
         expenseTypeName: t.expenseTypeId?.name || '',
+        rawMaterialHeadId: t.rawMaterialHeadId,
+        rawMaterialHeadName: t.rawMaterialHeadId?.name || '',
       });
     });
     sales.forEach((s) => {
@@ -185,13 +188,14 @@ export const list = async (req, res) => {
     .populate('saleId')
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
     .sort({ date: -1 })
     .lean();
   res.json({ success: true, data: transactions });
 };
 
 export const create = async (req, res) => {
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, tax, or expense' });
   }
@@ -238,6 +242,7 @@ export const create = async (req, res) => {
     machineryPurchaseId: machineryPurchaseId || null,
     taxTypeId: taxTypeId || null,
     expenseTypeId: expenseTypeId || null,
+    rawMaterialHeadId: rawMaterialHeadId || null,
     image: req.file ? req.file.filename : null,
     paymentMethod: paymentMethod || 'cash',
     chequeNumber: (chequeNumber || '').trim(),
@@ -252,6 +257,7 @@ export const create = async (req, res) => {
     .populate('mazdoorId', 'name')
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
     .lean();
   res.status(201).json({ success: true, data: populated });
 };
@@ -265,6 +271,7 @@ export const getById = async (req, res) => {
     .populate('mazdoorId', 'name')
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
     .lean();
   if (!transaction) {
     return res.status(404).json({ success: false, message: 'Transaction not found' });

@@ -17,6 +17,7 @@ const transactionSchema = new mongoose.Schema(
     machineryPurchaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'MachineryPurchase', default: null },
     taxTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaxType', default: null },
     expenseTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExpenseType', default: null },
+    rawMaterialHeadId: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterialHead', default: null },
     image: { type: String, default: null },
     paymentMethod: { type: String, enum: ['cash', 'online', 'cheque'], default: 'cash' },
     chequeNumber: { type: String, trim: true, default: '' },

@@ -159,6 +159,7 @@ export const getDailyMemo = async (req, res) => {
     })
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
     .sort({ date: 1, createdAt: 1 })
     .lean();
   
@@ -185,6 +186,7 @@ export const getDailyMemo = async (req, res) => {
       desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || 'Part/Asset'}`;
     } else if (t.taxTypeId) desc = 'Tax Payment';
     else if (t.expenseTypeId) desc = 'General Expense';
+    else if (t.rawMaterialHeadId) desc = `Raw Material — ${t.rawMaterialHeadId.name || 'Item'}`;
     else if (category === 'mill_expense') desc = 'Mill Expense';
     else if (category === 'mazdoor_expense') desc = 'Mazdoor Expense';
     else desc = t.note || category.replace('_', ' ');
@@ -195,6 +197,7 @@ export const getDailyMemo = async (req, res) => {
       else if (category === 'mazdoor_expense') displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : (t.note || 'Mazdoor Expense');
       else if (t.taxTypeId) displayName = t.taxTypeId.name || 'Tax Payment';
       else if (t.expenseTypeId) displayName = t.expenseTypeId.name || 'General Expense';
+      else if (t.rawMaterialHeadId) displayName = t.rawMaterialHeadId.name || 'Raw Material';
     }
 
     if (t.paymentMethod === 'cheque') desc += ` | Cheque #${t.chequeNumber || '—'}`;
