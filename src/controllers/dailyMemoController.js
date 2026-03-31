@@ -84,11 +84,13 @@ export const getDailyMemo = async (req, res) => {
           $sum: { 
             $cond: [
               { $or: [
-                // Case A: Specific Account selected + it is the recipient
-                { $and: [!!accountId, { $eq: ['$toAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                // Case A: Specific Account selected + Source=Credit logic
+                { $and: [!!accountId, { $ne: ['$type', 'transfer'] }, { $eq: ['$toAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                { $and: [!!accountId, { $eq: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', new mongoose.Types.ObjectId(accountId)] }] },
                 // Case B: Full Mill Summary + money entered ANY Mill Account
+                // (Note: Internal transfers cancel out mathematically in Full Mill view)
                 { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ['$toAccountId', millAccObjectIdIds] }] },
-                // Case C: Party ledgers (money entering the party's ledger)
+                // Case C: Party ledgers
                 { $and: [!!customerId, { $eq: ['$type', 'deposit'] }] },
                 { $and: [!!supplierId, { $eq: ['$type', 'deposit'] }] },
                 { $and: [!!mazdoorId, { $eq: ['$category', 'salary_accrual'] }] },
@@ -102,11 +104,12 @@ export const getDailyMemo = async (req, res) => {
           $sum: { 
             $cond: [
               { $or: [
-                // Case A: Specific Account selected + it is the sender
-                { $and: [!!accountId, { $eq: ['$fromAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                // Case A: Specific Account selected + Destination=Debit logic
+                { $and: [!!accountId, { $ne: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', new mongoose.Types.ObjectId(accountId)] }] },
+                { $and: [!!accountId, { $eq: ['$type', 'transfer'] }, { $eq: ['$toAccountId', new mongoose.Types.ObjectId(accountId)] }] },
                 // Case B: Full Mill Summary + money left ANY Mill Account
                 { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ['$fromAccountId', millAccObjectIdIds] }] },
-                // Case C: Party ledgers (money leaving the party's ledger)
+                // Case C: Party ledgers
                 { $and: [!!customerId, { $eq: ['$type', 'withdraw'] }] },
                 { $and: [!!supplierId, { $eq: ['$type', 'withdraw'] }] },
                 { $and: [!!mazdoorId, { $in: ['$type', ['withdraw', 'salary']] }] },
@@ -272,9 +275,9 @@ export const getDailyMemo = async (req, res) => {
         });
       }
     } else if (type === 'transfer') {
-      // Internal transfers always show Aamne-Samne (Out from one, In to another)
-      rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
-      rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
+      // Internal transfers always show Aamne-Samne (Source=In/Aamad, Destination=Out/Kharch)
+      rows.push({ type: 'transfer_out', date: t.date, name: t.fromAccountId?.name || 'Account', description: `Transfer to ${t.toAccountId?.name || '—'}`, accountName: t.fromAccountId?.name || 'Manual', amount: t.amount, amountType: 'in', isExternal, referenceId: t._id });
+      rows.push({ type: 'transfer_in', date: t.date, name: t.toAccountId?.name || 'Account', description: `Transfer from ${t.fromAccountId?.name || '—'}`, accountName: t.toAccountId?.name || 'Manual', amount: t.amount, amountType: 'out', isExternal, referenceId: t._id });
     }
   });
 

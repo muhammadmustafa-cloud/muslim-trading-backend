@@ -70,8 +70,30 @@ export const getAuditSummary = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalIn: { $sum: { $cond: [{ $in: ['$toAccountId', millAccIds] }, '$amount', 0] } },
-          totalOut: { $sum: { $cond: [{ $in: ['$fromAccountId', millAccIds] }, '$amount', 0] } },
+          totalIn: { 
+            $sum: { 
+              $cond: [
+                { $or: [
+                  { $and: [{ $ne: ['$type', 'transfer'] }, { $in: ['$toAccountId', millAccIds] }] },
+                  { $and: [{ $eq: ['$type', 'transfer'] }, { $in: ['$fromAccountId', millAccIds] }] }
+                ]}, 
+                '$amount', 
+                0
+              ] 
+            } 
+          },
+          totalOut: { 
+            $sum: { 
+              $cond: [
+                { $or: [
+                  { $and: [{ $ne: ['$type', 'transfer'] }, { $in: ['$fromAccountId', millAccIds] }] },
+                  { $and: [{ $eq: ['$type', 'transfer'] }, { $in: ['$toAccountId', millAccIds] }] }
+                ]}, 
+                '$amount', 
+                0
+              ] 
+            } 
+          },
         }
       }
     ]);
@@ -86,8 +108,30 @@ export const getAuditSummary = async (req, res) => {
         { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
         { $group: {
           _id: null,
-          totalIn: { $sum: { $cond: [{ $eq: ['$toAccountId', a._id] }, '$amount', 0] } },
-          totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
+          totalIn: { 
+            $sum: { 
+              $cond: [
+                { $or: [
+                  { $and: [{ $ne: ['$type', 'transfer'] }, { $eq: ['$toAccountId', a._id] }] },
+                  { $and: [{ $eq: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', a._id] }] }
+                ]}, 
+                '$amount', 
+                0
+              ] 
+            } 
+          },
+          totalOut: { 
+            $sum: { 
+              $cond: [
+                { $or: [
+                  { $and: [{ $ne: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', a._id] }] },
+                  { $and: [{ $eq: ['$type', 'transfer'] }, { $eq: ['$toAccountId', a._id] }] }
+                ]}, 
+                '$amount', 
+                0
+              ] 
+            } 
+          }
         }}
       ]);
 
@@ -595,8 +639,8 @@ export const getConsolidatedLedgers = async (req, res) => {
       const op = await getEntityOpeningBalance('account', party._id, party.openingBalance);
       const trans = activeTrans.filter(t => t.fromAccountId?.toString() === aId || t.toAccountId?.toString() === aId);
       const ledger = trans.map(t => {
-        const isIn = t.toAccountId?.toString() === aId;
-        return { date: t.date, description: t.note || (isIn ? 'Inflow' : 'Outflow'), debit: isIn ? t.amount : 0, credit: !isIn ? t.amount : 0 };
+        const isIn = t.fromAccountId?.toString() === aId || t.fromAccountId?._id?.toString() === aId; // Source (From) = Credit/In
+        return { date: t.date, description: t.note || (isIn ? 'Inflow' : 'Outflow'), debit: isIn ? 0 : t.amount, credit: isIn ? t.amount : 0 };
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.accounts.push({ name: party.name, openingBalance: op, ledger });
