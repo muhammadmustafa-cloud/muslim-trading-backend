@@ -68,11 +68,11 @@ export const getKhata = async (req, res) => {
   }
   const { dateFrom, dateTo } = req.query;
   const dateFilter = {};
-  if (dateFrom) dateFilter.$gte = new Date(dateFrom);
+  if (dateFrom) {
+    dateFilter.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+  }
   if (dateTo) {
-    const d = new Date(dateTo);
-    d.setHours(23, 59, 59, 999);
-    dateFilter.$lte = d;
+    dateFilter.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
   }
   const hasDateFilter = Object.keys(dateFilter).length > 0;
   const itemId = new mongoose.Types.ObjectId(req.params.id);

@@ -33,7 +33,7 @@ function dateFilter(dateFrom, dateTo) {
 export const getDailyMemo = async (req, res) => {
   const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
   const fromStr = dateFrom || todayStr;
   const toStr = dateTo || todayStr;
 

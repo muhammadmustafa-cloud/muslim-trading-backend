@@ -35,7 +35,9 @@ export const create = async (req, res) => {
   // 1. Create the Purchase Entry
   const purchase = await MachineryPurchase.create({
     // Force PKT Offset for string dates
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date 
+      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
+      : new Date(),
     machineryItemId,
     supplierId,
     accountId,

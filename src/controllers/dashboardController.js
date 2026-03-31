@@ -16,9 +16,7 @@ export const getSummary = async (req, res) => {
   const useLowStock = !isNaN(lowStockThreshold);
 
   // Professional Fix: Calculate Today's boundaries in PKT (UTC+5)
-  const now = new Date();
-  // Adjust to PKT for date string extraction
-  const pktDateStr = new Date(now.getTime() + (5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+  const pktDateStr = new Date().toLocaleString("en-CA", { timeZone: "Asia/Karachi" }).slice(0, 10);
   
   const todayStart = new Date(`${pktDateStr}T00:00:00+05:00`);
   const todayEnd = new Date(`${pktDateStr}T23:59:59.999+05:00`);

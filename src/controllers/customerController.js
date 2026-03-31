@@ -144,8 +144,8 @@ export const getHistory = async (req, res) => {
   // 3. Transform into Ledger Entries
   const ledger = [];
 
-  // Opening Balance (placed at the start if no date filter or if dateFrom allows)
-  if (!dateFrom || new Date(dateFrom) <= customer.createdAt) {
+  const startBoundary = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : null;
+  if (!dateFrom || (startBoundary && startBoundary <= new Date(customer.createdAt))) {
     ledger.push({
       date: customer.createdAt,
       description: 'Opening Balance',

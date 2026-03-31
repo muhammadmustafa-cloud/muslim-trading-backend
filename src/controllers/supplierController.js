@@ -143,8 +143,8 @@ export const getHistory = async (req, res) => {
   // 3. Transform into Ledger Entries
   const ledger = [];
 
-  // Opening Balance
-  if (!dateFrom || new Date(dateFrom) <= supplier.createdAt) {
+  const startBoundary = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : null;
+  if (!dateFrom || (startBoundary && startBoundary <= new Date(supplier.createdAt))) {
     ledger.push({
       date: supplier.createdAt,
       description: 'Opening Balance',

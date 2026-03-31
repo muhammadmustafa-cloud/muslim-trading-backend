@@ -163,8 +163,10 @@ export const create = async (req, res) => {
   else if (received > 0) paymentStatus = 'partial';
 
   const sale = await Sale.create({
-    // Force PKT OOffset for strings, otherwise default to now
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    // Force PKT Offset for string dates
+    date: date 
+      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
+      : new Date(),
     customerId,
     totalGrossWeight: grossTotal,
     totalSHCut: cutTotal,

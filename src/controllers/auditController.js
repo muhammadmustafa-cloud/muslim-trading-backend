@@ -17,14 +17,10 @@ export const getAuditSummary = async (req, res) => {
     const { dateFrom, dateTo } = req.query;
     
     // Strict Date Boundary Fix (Forcing absolute start/end of PKT (UTC+5) day)
-    // This ensures consistency regardless of server location or system timezone.
-    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
-    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999+05:00`) : new Date();
-    if (!dateTo) {
-      // If dateTo is not provided, we assume "today" and set it to the very end of today PKT.
-      // Note: In an ideal scenario, this should also calculate today's end in PKT.
-      toDate.setHours(23, 59, 59, 999);
-    }
+    const toDateStr = dateTo || new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
+    const fromDateStr = dateFrom || toDateStr;
+    const fromDate = new Date(`${fromDateStr}T00:00:00+05:00`);
+    const toDate = new Date(`${toDateStr}T23:59:59.999+05:00`);
 
     const [
       accounts,
@@ -130,12 +126,35 @@ export const getAuditSummary = async (req, res) => {
        { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
     ]);
 
+    const periodMatch = activityMatch;
+    const periodCustomerTrans = await Transaction.aggregate([
+      { $match: { ...periodMatch, customerId: { $ne: null } } },
+      { $group: { 
+        _id: '$customerId', 
+        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+      } }
+    ]);
+    const periodCustomerSales = await Sale.aggregate([
+       { $match: periodMatch },
+       { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
+    ]);
+
     const detailedCustomers = customers.map(c => {
-      const trans = customerTransactions.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const sales = customerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
-      // Always use opening balance for master audit snapshot
-      const balance = (c.openingBalance || 0) + sales.total - trans.totalIn + trans.totalOut;
-      return { _id: c._id, name: c.name, balance, phone: c.phone || '' };
+      const snapTrans = customerTransactions.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const snapSales = customerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
+      const pTrans = periodCustomerTrans.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const pSales = periodCustomerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
+
+      const balance = (c.openingBalance || 0) + snapSales.total - snapTrans.totalIn + snapTrans.totalOut;
+      return { 
+        _id: c._id, 
+        name: c.name, 
+        balance, 
+        phone: c.phone || '',
+        periodIn: pTrans.totalIn, // Movement In
+        periodOut: pSales.total + pTrans.totalOut // Movement Out (Sales added here)
+      };
     }).sort((a, b) => b.balance - a.balance);
 
     const totalReceivables = detailedCustomers.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0);
@@ -155,11 +174,34 @@ export const getAuditSummary = async (req, res) => {
       { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
     ]);
 
+    const periodSupplierTrans = await Transaction.aggregate([
+      { $match: { ...periodMatch, supplierId: { $ne: null } } },
+      { $group: { 
+        _id: '$supplierId', 
+        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+      } }
+    ]);
+    const periodSupplierPurchases = await StockEntry.aggregate([
+      { $match: periodMatch },
+      { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
+    ]);
+
     const detailedSuppliers = suppliers.map(s => {
-      const trans = supplierTransactions.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const purchases = supplierPurchases.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
-      const balance = (s.openingBalance || 0) - purchases.total + trans.totalOut - trans.totalIn;
-      return { _id: s._id, name: s.name, balance, phone: s.phone || '' };
+      const snapTrans = supplierTransactions.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const snapPurch = supplierPurchases.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
+      const pTrans = periodSupplierTrans.find(b => b._id?.toString() === s._id.toString()) || { totalIn: 0, totalOut: 0 };
+      const pPurch = periodSupplierPurchases.find(p => p._id?.toString() === s._id.toString()) || { total: 0 };
+
+      const balance = (s.openingBalance || 0) - snapPurch.total + snapTrans.totalOut - snapTrans.totalIn;
+      return { 
+        _id: s._id, 
+        name: s.name, 
+        balance, 
+        phone: s.phone || '',
+        periodIn: pPurch.total + pTrans.totalIn, // Movement In (Purchase added here)
+        periodOut: pTrans.totalOut // Movement Out
+      };
     }).sort((a, b) => a.balance - b.balance);
 
     const totalSupplierPayables = detailedSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0);
@@ -173,16 +215,29 @@ export const getAuditSummary = async (req, res) => {
         earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
       }}
     ]);
+
+    const periodMazdoorTrans = await Transaction.aggregate([
+      { $match: { ...periodMatch, mazdoorId: { $ne: null } } },
+      { $group: {
+        _id: '$mazdoorId',
+        paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
+        earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
+      }}
+    ]);
+
     const detailedMazdoors = mazdoors.map(m => {
-      const stat = mazdoorTransactions.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
-      const balance = stat.earned - stat.paid;
+      const snap = mazdoorTransactions.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
+      const pStat = periodMazdoorTrans.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
+      
+      const balance = snap.earned - snap.paid;
       return { 
         _id: m._id, 
         name: m.name, 
         balance, 
-        earned: stat.earned, 
-        paid: stat.paid,
-        contact: m.contact || '' 
+        earned: snap.earned, 
+        paid: snap.paid,
+        periodEarned: pStat.earned,
+        periodPaid: pStat.paid
       };
     }).sort((a, b) => b.balance - a.balance);
 
@@ -322,8 +377,10 @@ export const getAuditSummary = async (req, res) => {
 export const getConsolidatedLedgers = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
-    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
-    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999+05:00`) : new Date();
+    const toDateStr = dateTo || new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
+    const fromDateStr = dateFrom || toDateStr;
+    const fromDate = new Date(`${fromDateStr}T00:00:00+05:00`);
+    const toDate = new Date(`${toDateStr}T23:59:59.999+05:00`);
 
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 

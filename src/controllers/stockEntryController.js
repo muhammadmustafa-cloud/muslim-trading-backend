@@ -116,7 +116,9 @@ export const create = async (req, res) => {
 
   const entry = await StockEntry.create({
     // Force PKT Offset for string dates
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date 
+      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
+      : new Date(),
     supplierId,
     totalGrossWeight: grossTotal,
     totalSHCut: cutTotal || processedItems.reduce((sum, i) => sum + i.shCut, 0),

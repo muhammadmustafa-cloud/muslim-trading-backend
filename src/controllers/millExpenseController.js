@@ -77,7 +77,9 @@ export const create = async (req, res) => {
   }
 
   const expense = await MillExpense.create({
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date 
+      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
+      : new Date(),
     amount: amt,
     category: (category || '').trim(),
     note: (note || '').trim(),

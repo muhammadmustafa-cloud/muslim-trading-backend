@@ -13,12 +13,15 @@ async function getAccountBalance(accountId, asOfDate) {
   if (!accountId) return 0;
   const id = new mongoose.Types.ObjectId(accountId);
   
-  // Professional Fix: Ensure asOfDate string is interpreted as PKT End-of-Day
-  let boundaryDate = asOfDate;
-  if (asOfDate && typeof asOfDate === 'string' && asOfDate.length === 10) {
-    boundaryDate = new Date(`${asOfDate}T23:59:59.999+05:00`);
-  } else if (asOfDate) {
-    boundaryDate = new Date(asOfDate);
+  // Professional Fix: Ensure asOfDate is interpreted as PKT End-of-Day
+  let boundaryDate = null;
+  if (asOfDate) {
+    if (typeof asOfDate === 'string' && asOfDate.length === 10) {
+      boundaryDate = new Date(`${asOfDate}T23:59:59.999+05:00`);
+    } else {
+      // If it's already a Date object, ensure it's treated accurately
+      boundaryDate = new Date(asOfDate);
+    }
   }
   
   const dateMatch = boundaryDate ? { date: { $lte: boundaryDate } } : {};
@@ -252,7 +255,9 @@ export const create = async (req, res) => {
   const transaction = await Transaction.create({
     // Professional Fix: If a string date is provided, force it to PKT 00:00:00.
     // Otherwise, use current absolute time.
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date 
+      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
+      : new Date(),
     type,
     fromAccountId: fromAccountId || null,
     toAccountId: toAccountId || null,
