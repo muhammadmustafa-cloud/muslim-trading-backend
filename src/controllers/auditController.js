@@ -7,6 +7,7 @@ import StockEntry from '../models/StockEntry.js';
 import Transaction from '../models/Transaction.js';
 import MachineryPurchase from '../models/MachineryPurchase.js';
 import Item from '../models/Item.js';
+import RawMaterialHead from '../models/RawMaterialHead.js';
 import { getAccountBalance } from './transactionController.js';
 import { getCurrentStockData } from './stockController.js';
 
@@ -28,7 +29,8 @@ export const getAuditSummary = async (req, res) => {
       stockData,
       expenses,
       taxes,
-      allItems
+      allItems,
+      rawMaterialHeads
     ] = await Promise.all([
       Account.find({}).lean(),
       Customer.find({}).lean(),
@@ -48,6 +50,7 @@ export const getAuditSummary = async (req, res) => {
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
       Item.find({}).lean(),
+      RawMaterialHead.find({}).lean(),
     ]);
 
     const isPeriodAudit = !!(dateFrom || dateTo);
@@ -213,6 +216,26 @@ export const getAuditSummary = async (req, res) => {
         saleVolume: s.totalSale
       };
     }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0);
+    
+    // 6.b Raw Material Heads Activity Aggregations
+    const rawMaterialActivity = await Transaction.aggregate([
+      { $match: { ...activityMatch, rawMaterialHeadId: { $ne: null } } },
+      { $group: {
+        _id: '$rawMaterialHeadId',
+        periodCredit: { $sum: { $cond: [{ $in: ['$type', ['deposit', 'sale', 'income']] }, '$amount', 0] } },
+        periodDebit: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary', 'tax', 'expense', 'purchase']] }, '$amount', 0] } }
+      }}
+    ]);
+
+    const detailedRawMaterials = rawMaterialHeads.map(rm => {
+      const act = rawMaterialActivity.find(x => x._id?.toString() === rm._id.toString()) || { periodCredit: 0, periodDebit: 0 };
+      return {
+        _id: rm._id,
+        name: rm.name,
+        periodCredit: act.periodCredit,
+        periodDebit: act.periodDebit
+      };
+    }).filter(rm => rm.periodCredit > 0 || rm.periodDebit > 0);
 
     // 7. Detailed Expenses & Taxes
     // 8. Period Transactions for Audit Trail (Len Den Detail)
@@ -226,6 +249,7 @@ export const getAuditSummary = async (req, res) => {
     .populate('toAccountId', 'name')
     .populate('expenseTypeId', 'name')
     .populate('taxTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
     .sort({ date: 1 })
     .lean();
 
@@ -274,6 +298,7 @@ export const getAuditSummary = async (req, res) => {
         taxes: detailedTaxes,
         accounts: accountDetails,
         items: detailedItems,
+        rawMaterials: detailedRawMaterials,
         periodTransactions
       }
     });
