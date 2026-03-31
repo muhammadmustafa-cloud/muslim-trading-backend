@@ -16,11 +16,11 @@ function dateFilter(dateFrom, dateTo) {
   const filter = {};
   if (dateFrom || dateTo) {
     filter.date = {};
-    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    if (dateFrom) {
+      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+    }
     if (dateTo) {
-      const d = new Date(dateTo);
-      d.setHours(23, 59, 59, 999);
-      filter.date.$lte = d;
+      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
     }
   }
   return filter;
@@ -37,9 +37,8 @@ export const getDailyMemo = async (req, res) => {
   const fromStr = dateFrom || todayStr;
   const toStr = dateTo || todayStr;
 
-  const fromDate = new Date(fromStr);
-  const toDate = new Date(toStr);
-  toDate.setHours(23, 59, 59, 999);
+  const fromDate = new Date(`${fromStr}T00:00:00+05:00`);
+  const toDate = new Date(`${toStr}T23:59:59.999+05:00`);
 
   const prevMatch = { date: { $lt: fromDate }, type: { $ne: 'accrual' } };
   if (accountId) {
