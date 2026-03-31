@@ -7,11 +7,11 @@ export const list = async (req, res) => {
   const filter = {};
   if (dateFrom || dateTo) {
     filter.date = {};
-    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    if (dateFrom) {
+      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+    }
     if (dateTo) {
-      const d = new Date(dateTo);
-      d.setHours(23, 59, 59, 999);
-      filter.date.$lte = d;
+      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
     }
   }
   if (machineryItemId) filter.machineryItemId = new mongoose.Types.ObjectId(machineryItemId);
@@ -34,7 +34,8 @@ export const create = async (req, res) => {
 
   // 1. Create the Purchase Entry
   const purchase = await MachineryPurchase.create({
-    date: date ? new Date(date) : new Date(),
+    // Force PKT Offset for string dates
+    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
     machineryItemId,
     supplierId,
     accountId,

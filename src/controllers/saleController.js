@@ -48,11 +48,11 @@ export const list = async (req, res) => {
   const filter = {};
   if (dateFrom || dateTo) {
     filter.date = {};
-    if (dateFrom) filter.date.$gte = new Date(dateFrom);
+    if (dateFrom) {
+      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+    }
     if (dateTo) {
-      const d = new Date(dateTo);
-      d.setHours(23, 59, 59, 999);
-      filter.date.$lte = d;
+      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
     }
   }
   if (customerId) filter.customerId = new mongoose.Types.ObjectId(customerId);
@@ -163,7 +163,8 @@ export const create = async (req, res) => {
   else if (received > 0) paymentStatus = 'partial';
 
   const sale = await Sale.create({
-    date: date ? new Date(date) : new Date(),
+    // Force PKT OOffset for strings, otherwise default to now
+    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
     customerId,
     totalGrossWeight: grossTotal,
     totalSHCut: cutTotal,
@@ -221,7 +222,9 @@ export const update = async (req, res) => {
     }
   }
 
-  if (date != null) sale.date = new Date(date);
+  if (date != null) {
+    sale.date = (typeof date === 'string' && date.length === 10) ? new Date(`${date}T00:00:00+05:00`) : new Date(date);
+  }
   if (customerId != null) sale.customerId = customerId;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
   if (gatePassNo !== undefined) sale.gatePassNo = (gatePassNo || '').trim();
@@ -352,7 +355,7 @@ export const collectPayment = async (req, res) => {
   // Payment logic using global Transaction import
 
   const transaction = await Transaction.create({
-    date: date ? new Date(date) : new Date(),
+    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
     type: 'deposit',
     fromAccountId: null,
     toAccountId: accountId,

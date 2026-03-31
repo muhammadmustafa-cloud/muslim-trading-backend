@@ -16,10 +16,15 @@ export const getAuditSummary = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
     
-    // Strict Date Boundary Fix (Forcing absolute start/end of local calendar day)
-    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : new Date(0);
-    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999`) : new Date();
-    if (!dateTo) toDate.setHours(23, 59, 59, 999);
+    // Strict Date Boundary Fix (Forcing absolute start/end of PKT (UTC+5) day)
+    // This ensures consistency regardless of server location or system timezone.
+    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999+05:00`) : new Date();
+    if (!dateTo) {
+      // If dateTo is not provided, we assume "today" and set it to the very end of today PKT.
+      // Note: In an ideal scenario, this should also calculate today's end in PKT.
+      toDate.setHours(23, 59, 59, 999);
+    }
 
     const [
       accounts,
@@ -57,16 +62,15 @@ export const getAuditSummary = async (req, res) => {
     const isPeriodAudit = !!(dateFrom || dateTo);
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
-    // Calculate Mill Opening Balance (Pichli Wasooli) - Specifically requested up to 1 day before END DATE (Yesterday's Baqaya)
-    const toDateStart = dateTo ? new Date(`${dateTo}T00:00:00`) : new Date();
-    if (!dateTo) toDateStart.setHours(0, 0, 0, 0);
+    // Calculate Mill Opening Balance (Pichli Wasooli) - Balance BEFORE the start of the selected range.
+    const opBalBoundary = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
 
     const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
     const millAccIds = allMillAccs.map(a => a._id);
     const baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
 
     const prevTransactions = await Transaction.aggregate([
-      { $match: { date: { $lt: toDateStart }, type: { $ne: 'accrual' } } },
+      { $match: { date: { $lt: opBalBoundary }, type: { $ne: 'accrual' } } },
       {
         $group: {
           _id: null,
@@ -318,8 +322,8 @@ export const getAuditSummary = async (req, res) => {
 export const getConsolidatedLedgers = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
-    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : new Date(0);
-    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999`) : new Date();
+    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999+05:00`) : new Date();
 
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 

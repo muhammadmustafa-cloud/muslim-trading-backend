@@ -69,11 +69,11 @@ export const getHistory = async (req, res) => {
   const dateFilter = {};
   if (dateFrom || dateTo) {
     dateFilter.date = {};
-    if (dateFrom) dateFilter.date.$gte = new Date(dateFrom);
+    if (dateFrom) {
+      dateFilter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+    }
     if (dateTo) {
-      const d = new Date(dateTo);
-      d.setHours(23, 59, 59, 999);
-      dateFilter.date.$lte = d;
+      dateFilter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
     }
   }
 

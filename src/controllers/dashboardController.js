@@ -15,10 +15,13 @@ export const getSummary = async (req, res) => {
   const lowStockThreshold = Number(req.query.lowStockThreshold);
   const useLowStock = !isNaN(lowStockThreshold);
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 999);
+  // Professional Fix: Calculate Today's boundaries in PKT (UTC+5)
+  const now = new Date();
+  // Adjust to PKT for date string extraction
+  const pktDateStr = new Date(now.getTime() + (5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+  
+  const todayStart = new Date(`${pktDateStr}T00:00:00+05:00`);
+  const todayEnd = new Date(`${pktDateStr}T23:59:59.999+05:00`);
 
   const [customersCount, suppliersCount, mazdoorCount, accounts, todaySalesResult, stockData, totalPurchaseResult, totalSalesResult, pendingPaymentsResult] = await Promise.all([
     Customer.countDocuments(),

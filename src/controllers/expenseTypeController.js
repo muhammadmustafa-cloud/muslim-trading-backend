@@ -50,11 +50,11 @@ export const getLedger = async (req, res) => {
     const query = { expenseTypeId: id };
     if (dateFrom || dateTo) {
       query.date = {};
-      if (dateFrom) query.date.$gte = new Date(dateFrom);
+      if (dateFrom) {
+        query.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
+      }
       if (dateTo) {
-        const d = new Date(dateTo);
-        d.setHours(23, 59, 59, 999);
-        query.date.$lte = d;
+        query.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
       }
     }
 
