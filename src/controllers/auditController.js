@@ -335,8 +335,8 @@ export const getConsolidatedLedgers = async (req, res) => {
       allItems
     ] = await Promise.all([
       Transaction.find(activityMatch).lean(),
-      Sale.find(activityMatch).lean(),
-      StockEntry.find(activityMatch).lean(),
+      Sale.find(activityMatch).populate('customerId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
+      StockEntry.find(activityMatch).populate('supplierId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
       Customer.find({}).lean(),
       Supplier.find({}).lean(),
       Mazdoor.find({}).lean(),
@@ -348,12 +348,12 @@ export const getConsolidatedLedgers = async (req, res) => {
     ]);
 
     const activeCustomerIds = new Set([
-      ...activeTrans.map(t => t.customerId?.toString()).filter(Boolean),
-      ...activeSales.map(s => s.customerId?.toString()).filter(Boolean)
+      ...activeTrans.map(t => t.customerId?._id?.toString() || t.customerId?.toString()).filter(Boolean),
+      ...activeSales.map(s => s.customerId?._id?.toString() || s.customerId?.toString()).filter(Boolean)
     ]);
     const activeSupplierIds = new Set([
-      ...activeTrans.map(t => t.supplierId?.toString()).filter(Boolean),
-      ...activePurchases.map(p => p.supplierId?.toString()).filter(Boolean)
+      ...activeTrans.map(t => t.supplierId?._id?.toString() || t.supplierId?.toString()).filter(Boolean),
+      ...activePurchases.map(p => p.supplierId?._id?.toString() || p.supplierId?.toString()).filter(Boolean)
     ]);
     const activeMazdoorIds = new Set([...activeTrans.map(t => t.mazdoorId?.toString()).filter(Boolean)]);
     const activeExpenseTypeIds = new Set([...activeTrans.map(t => t.expenseTypeId?.toString()).filter(Boolean)]);
@@ -364,8 +364,8 @@ export const getConsolidatedLedgers = async (req, res) => {
       ...activeTrans.map(t => t.toAccountId?.toString()).filter(Boolean)
     ]);
     const activeItemIds = new Set([
-      ...activeSales.reduce((acc, s) => [...acc, ...(s.items || []).map(i => i.itemId?.toString())], []),
-      ...activePurchases.reduce((acc, p) => [...acc, ...(p.items || []).map(i => i.itemId?.toString())], [])
+      ...activeSales.reduce((acc, s) => [...acc, ...(s.items || []).map(i => i.itemId?._id?.toString() || i.itemId?.toString())], []),
+      ...activePurchases.reduce((acc, p) => [...acc, ...(p.items || []).map(i => i.itemId?._id?.toString() || i.itemId?.toString())], [])
     ].filter(Boolean));
 
     const consolidatedData = {
@@ -376,10 +376,15 @@ export const getConsolidatedLedgers = async (req, res) => {
       taxes: [],
       rawMaterials: [],
       accounts: [],
-      items: []
+      items: [],
+      salesInvoices: activeSales,
+      purchaseInvoices: activePurchases
     };
 
     // Helper: Calculation of individual entity's opening balance as of fromDate
+    // Safe ID extractor: works for both plain ObjectId and populated objects
+    const getId = (ref) => ref?._id?.toString() || ref?.toString() || null;
+
     const getEntityOpeningBalance = async (type, id, openingVal = 0) => {
       const matchBefore = { date: { $lt: fromDate } };
       let balance = Number(openingVal) || 0;
@@ -447,8 +452,8 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allCustomers.find(c => c._id.toString() === cId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('customer', party._id, party.openingBalance);
-      const trans = activeTrans.filter(t => t.customerId?.toString() === cId);
-      const sales = activeSales.filter(s => s.customerId?.toString() === cId);
+      const trans = activeTrans.filter(t => getId(t.customerId) === cId);
+      const sales = activeSales.filter(s => getId(s.customerId) === cId);
       
       const ledger = [];
       sales.forEach(s => ledger.push({ date: s.date, description: `Sale Invoice (Truck: ${s.truckNumber || '-'})`, debit: s.totalAmount, credit: 0, bags: (s.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
@@ -463,8 +468,8 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allSuppliers.find(s => s._id.toString() === sId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('supplier', party._id, party.openingBalance);
-      const trans = activeTrans.filter(t => t.supplierId?.toString() === sId);
-      const purchases = activePurchases.filter(p => p.supplierId?.toString() === sId);
+      const trans = activeTrans.filter(t => getId(t.supplierId) === sId);
+      const purchases = activePurchases.filter(p => getId(p.supplierId) === sId);
 
       const ledger = [];
       purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
@@ -540,18 +545,18 @@ export const getConsolidatedLedgers = async (req, res) => {
       if (!party) continue;
       const op = await getEntityOpeningBalance('item', party._id, 0); // No real opening monetory val for item usually, just turnover
       
-      const itemSales = activeSales.filter(s => (s.items || []).some(item => item.itemId?.toString() === iId));
-      const itemPurchases = activePurchases.filter(p => (p.items || []).some(item => item.itemId?.toString() === iId));
+      const itemSales = activeSales.filter(s => (s.items || []).some(item => getId(item.itemId) === iId));
+      const itemPurchases = activePurchases.filter(p => (p.items || []).some(item => getId(item.itemId) === iId));
 
       const ledger = [];
       itemSales.forEach(s => {
-         const match = s.items.find(it => it.itemId?.toString() === iId);
-         const custName = allCustomers.find(c => c._id.toString() === s.customerId?.toString())?.name || "Customer";
+         const match = s.items.find(it => getId(it.itemId) === iId);
+         const custName = s.customerId?.name || allCustomers.find(c => c._id.toString() === getId(s.customerId))?.name || "Customer";
          ledger.push({ date: s.date, description: `Sale to ${custName} (Truck: ${s.truckNumber || '-'})`, debit: match.totalAmount, credit: 0, status: 'sold', bags: match.kattay || 0, weight: match.quantity || 0 });
       });
       itemPurchases.forEach(p => {
-         const match = p.items.find(it => it.itemId?.toString() === iId);
-         const supName = allSuppliers.find(sup => sup._id.toString() === p.supplierId?.toString())?.name || "Supplier";
+         const match = p.items.find(it => getId(it.itemId) === iId);
+         const supName = p.supplierId?.name || allSuppliers.find(sup => sup._id.toString() === getId(p.supplierId))?.name || "Supplier";
          ledger.push({ date: p.date, description: `Purchase from ${supName} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: match.amount, status: 'purchased', bags: match.kattay || 0, weight: match.quantity || match.receivedWeight || 0 });
       });
 
