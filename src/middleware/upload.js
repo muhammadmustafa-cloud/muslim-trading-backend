@@ -1,36 +1,25 @@
 import multer from 'multer';
-import path from 'path';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
-// Define storage location and file naming strategy
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Files are uploaded directly to the "uploads" folder in the backend root
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    // Create unique filename using timestamp
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-  }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dbs72ujyh',
+  api_key: process.env.CLOUDINARY_API_KEY || '411876669888183',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'PH2BanztFRuJZa0V9LBht9mnoQw',
 });
 
-// Define file filter for images only
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only JPEG, PNG, JPG, and WEBP image formats are allowed!'), false);
-  }
-};
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'mill_receipts',
+    allowed_formats: ['jpeg', 'png', 'jpg', 'webp'],
+  },
+});
 
-// Create the unified upload middleware
 const upload = multer({
   storage: storage,
-  fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB strict limit
+    fileSize: 5 * 1024 * 1024,
   }
 });
 

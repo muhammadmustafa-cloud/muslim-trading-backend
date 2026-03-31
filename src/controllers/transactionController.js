@@ -249,7 +249,7 @@ export const create = async (req, res) => {
     taxTypeId: taxTypeId || null,
     expenseTypeId: expenseTypeId || null,
     rawMaterialHeadId: rawMaterialHeadId || null,
-    image: req.file ? req.file.filename : null,
+    image: req.file ? req.file.path : null,
     paymentMethod: paymentMethod || 'cash',
     chequeNumber: (chequeNumber || '').trim(),
     chequeDate: chequeDate ? new Date(chequeDate) : null,
