@@ -57,13 +57,16 @@ export const getAuditSummary = async (req, res) => {
     const isPeriodAudit = !!(dateFrom || dateTo);
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
-    // Calculate Mill Opening Balance (Pichli Wasooli)
+    // Calculate Mill Opening Balance (Pichli Wasooli) - Specifically requested up to 1 day before END DATE (Yesterday's Baqaya)
+    const toDateStart = dateTo ? new Date(`${dateTo}T00:00:00`) : new Date();
+    if (!dateTo) toDateStart.setHours(0, 0, 0, 0);
+
     const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
     const millAccIds = allMillAccs.map(a => a._id);
     const baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
 
     const prevTransactions = await Transaction.aggregate([
-      { $match: { date: { $lt: fromDate }, type: { $ne: 'accrual' } } },
+      { $match: { date: { $lt: toDateStart }, type: { $ne: 'accrual' } } },
       {
         $group: {
           _id: null,
