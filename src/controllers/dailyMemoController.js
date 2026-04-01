@@ -7,6 +7,7 @@ import Account from '../models/Account.js';
 import Customer from '../models/Customer.js';
 import Supplier from '../models/Supplier.js';
 import Mazdoor from '../models/Mazdoor.js';
+import DailyDastiEntry from '../models/DailyDastiEntry.js';
 import mongoose from 'mongoose';
 
 /**
@@ -285,9 +286,15 @@ export const getDailyMemo = async (req, res) => {
   const todayIn = rows.filter(r => r.amountType === 'in' && r.isExternal).reduce((s, r) => s + r.amount, 0);
   const todayOut = rows.filter(r => r.amountType === 'out' && r.isExternal).reduce((s, r) => s + r.amount, 0);
 
+  // 3. Fetch Dasti Entries for the same period
+  const dastiEntries = await DailyDastiEntry.find({
+    date: { $gte: fromDate, $lte: toDate }
+  }).sort({ date: 1, createdAt: 1 }).lean();
+
   res.json({
     success: true,
     data: rows,
+    dastiEntries,
     summary: {
       openingBalance,
       totalIn: todayIn,
