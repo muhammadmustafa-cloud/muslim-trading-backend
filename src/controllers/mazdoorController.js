@@ -1,6 +1,7 @@
 import Mazdoor from '../models/Mazdoor.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   const search = (req.query.search || '').trim();
@@ -66,16 +67,7 @@ export const getHistory = async (req, res) => {
   const { dateFrom, dateTo } = req.query;
   const mId = new mongoose.Types.ObjectId(req.params.id);
   
-  const dateFilter = {};
-  if (dateFrom || dateTo) {
-    dateFilter.date = {};
-    if (dateFrom) {
-      dateFilter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      dateFilter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const dateFilter = buildUTCDateFilter(dateFrom, dateTo);
 
   // Transactions (Payments/Advances)
   const transactions = await Transaction.find({ mazdoorId: mId, ...dateFilter })

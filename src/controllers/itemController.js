@@ -2,6 +2,7 @@ import Item from '../models/Item.js';
 import StockEntry from '../models/StockEntry.js';
 import Sale from '../models/Sale.js';
 import mongoose from 'mongoose';
+import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
 const itemListSelect = 'name categoryId quality';
 const itemListPopulate = { path: 'categoryId', select: 'name' };
@@ -67,13 +68,8 @@ export const getKhata = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Item not found' });
   }
   const { dateFrom, dateTo } = req.query;
-  const dateFilter = {};
-  if (dateFrom) {
-    dateFilter.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-  }
-  if (dateTo) {
-    dateFilter.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-  }
+  const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
+  const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
   const itemId = new mongoose.Types.ObjectId(req.params.id);
 

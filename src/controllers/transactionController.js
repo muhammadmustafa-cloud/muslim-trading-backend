@@ -4,6 +4,7 @@ import StockEntry from '../models/StockEntry.js';
 import TaxType from '../models/TaxType.js';
 import ExpenseType from '../models/ExpenseType.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, toUTCEndOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 /**
  * Returns net flow for account: (sales + deposits in + transfers in) − (withdrawals + transfers out).
@@ -13,11 +14,11 @@ async function getAccountBalance(accountId, asOfDate) {
   if (!accountId) return 0;
   const id = new mongoose.Types.ObjectId(accountId);
   
-  // Professional Fix: Ensure asOfDate is interpreted as PKT End-of-Day
+  // Professional Fix: Ensure asOfDate is interpreted as UTC End-of-Day
   let boundaryDate = null;
   if (asOfDate) {
     if (typeof asOfDate === 'string' && asOfDate.length === 10) {
-      boundaryDate = new Date(`${asOfDate}T23:59:59.999+05:00`);
+      boundaryDate = toUTCEndOfDay(asOfDate);
     } else {
       // If it's already a Date object, ensure it's treated accurately
       boundaryDate = new Date(asOfDate);
@@ -42,23 +43,12 @@ async function getAccountBalance(accountId, asOfDate) {
  */
 /**
  * Build date filter object for query.
- * Professional Fix: Forcing PKT (UTC+5) boundaries for all date strings.
+ * Professional Fix: Forcing UTC boundaries for all date strings.
  */
 function buildDateFilter(dateFrom, dateTo) {
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      // Force start of day PKT
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      // Force end of day PKT
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
-  return filter;
+  return buildUTCDateFilter(dateFrom, dateTo);
 }
+
 
 export const list = async (req, res) => {
   const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified, rawMaterialHeadId } = req.query;
@@ -253,12 +243,11 @@ export const create = async (req, res) => {
   }
 
   const transaction = await Transaction.create({
-    // Professional Fix: If a string date is provided, force it to PKT 00:00:00.
-    // Otherwise, use current absolute time.
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    // Professional Fix: If a string date is provided, force it to UTC 00:00:00.
+    // Otherwise, use current absolute time normalized to UTC.
+    date: date ? toUTCStartOfDay(date) : toUTCStartOfDay(new Date()),
     type,
+
     fromAccountId: fromAccountId || null,
     toAccountId: toAccountId || null,
     amount: amt,

@@ -1,4 +1,5 @@
 import DailyDastiEntry from '../models/DailyDastiEntry.js';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 /**
  * GET ALL DASTI ENTRIES
@@ -7,12 +8,7 @@ export const getDastiEntries = async (req, res) => {
   const { dateFrom, dateTo } = req.query;
 
   try {
-    const filter = {};
-    if (dateFrom || dateTo) {
-      filter.date = {};
-      if (dateFrom) filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-      if (dateTo) filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
+    const filter = buildUTCDateFilter(dateFrom, dateTo);
 
     const entries = await DailyDastiEntry.find(filter).sort({ date: 1, createdAt: 1 });
     res.status(200).json({ success: true, count: entries.length, data: entries });
@@ -32,7 +28,7 @@ export const createDastiEntry = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, Type (credit/debit), and Amount are required.' });
     }
 
-    const dastiDate = date ? new Date(`${date}T12:00:00+05:00`) : new Date();
+    const dastiDate = toUTCStartOfDay(date);
 
     const newEntry = await DailyDastiEntry.create({
       name,

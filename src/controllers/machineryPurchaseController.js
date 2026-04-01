@@ -1,19 +1,11 @@
 import MachineryPurchase from '../models/MachineryPurchase.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   const { dateFrom, dateTo, machineryItemId, supplierId } = req.query;
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (machineryItemId) filter.machineryItemId = new mongoose.Types.ObjectId(machineryItemId);
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
 
@@ -34,10 +26,8 @@ export const create = async (req, res) => {
 
   // 1. Create the Purchase Entry
   const purchase = await MachineryPurchase.create({
-    // Force PKT Offset for string dates
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    // Force UTC Offset
+    date: toUTCStartOfDay(date),
     machineryItemId,
     supplierId,
     accountId,

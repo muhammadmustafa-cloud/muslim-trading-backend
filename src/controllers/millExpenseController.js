@@ -3,6 +3,7 @@ import Transaction from '../models/Transaction.js';
 import Account from '../models/Account.js';
 import { getAccountBalance } from './transactionController.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 async function getOrCreateMillAccount() {
   let account = await Account.findOne({ isMillKhata: true }).lean();
@@ -21,16 +22,7 @@ async function getOrCreateMillAccount() {
 
 export const list = async (req, res) => {
   const { dateFrom, dateTo, page = 1, limit = 10 } = req.query;
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const filter = buildUTCDateFilter(dateFrom, dateTo);
 
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
@@ -77,9 +69,7 @@ export const create = async (req, res) => {
   }
 
   const expense = await MillExpense.create({
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    date: toUTCStartOfDay(date),
     amount: amt,
     category: (category || '').trim(),
     note: (note || '').trim(),

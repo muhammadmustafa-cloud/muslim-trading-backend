@@ -1,5 +1,6 @@
 import TaxType from '../models/TaxType.js';
 import Transaction from '../models/Transaction.js';
+import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   try {
@@ -47,16 +48,7 @@ export const getLedger = async (req, res) => {
     const taxType = await TaxType.findById(id).lean();
     if (!taxType) return res.status(404).json({ success: false, message: 'Tax type not found' });
 
-    const filter = { taxTypeId: id };
-    if (dateFrom || dateTo) {
-      filter.date = {};
-      if (dateFrom) {
-        filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-      }
-      if (dateTo) {
-        filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-      }
-    }
+    const filter = { taxTypeId: id, ...buildUTCDateFilter(dateFrom, dateTo) };
 
     const ledger = await Transaction.find(filter)
       .populate('fromAccountId', 'name')

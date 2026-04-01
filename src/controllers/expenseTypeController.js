@@ -1,5 +1,6 @@
 import ExpenseType from '../models/ExpenseType.js';
 import Transaction from '../models/Transaction.js';
+import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   try {
@@ -47,16 +48,7 @@ export const getLedger = async (req, res) => {
     const expenseType = await ExpenseType.findById(id).lean();
     if (!expenseType) return res.status(404).json({ success: false, message: 'Expense type not found' });
 
-    const query = { expenseTypeId: id };
-    if (dateFrom || dateTo) {
-      query.date = {};
-      if (dateFrom) {
-        query.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-      }
-      if (dateTo) {
-        query.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-      }
-    }
+    const query = { expenseTypeId: id, ...buildUTCDateFilter(dateFrom, dateTo) };
 
     const ledger = await Transaction.find(query)
       .sort({ date: -1, createdAt: -1 })

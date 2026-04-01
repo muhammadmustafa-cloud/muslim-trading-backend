@@ -9,22 +9,13 @@ import Supplier from '../models/Supplier.js';
 import Mazdoor from '../models/Mazdoor.js';
 import DailyDastiEntry from '../models/DailyDastiEntry.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, toUTCEndOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 /**
  * Build date filter for a single day or range.
  */
 function dateFilter(dateFrom, dateTo) {
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
-  return filter;
+  return buildUTCDateFilter(dateFrom, dateTo);
 }
 
 /**
@@ -34,12 +25,12 @@ function dateFilter(dateFrom, dateTo) {
 export const getDailyMemo = async (req, res) => {
   const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
 
-  const todayStr = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
+  const todayStr = new Date().toISOString().slice(0, 10);
   const fromStr = dateFrom || todayStr;
   const toStr = dateTo || todayStr;
 
-  const fromDate = new Date(`${fromStr}T00:00:00+05:00`);
-  const toDate = new Date(`${toStr}T23:59:59.999+05:00`);
+  const fromDate = toUTCStartOfDay(fromStr);
+  const toDate = toUTCEndOfDay(toStr);
 
   const prevMatch = { date: { $lt: fromDate }, type: { $ne: 'accrual' } };
   if (accountId) {

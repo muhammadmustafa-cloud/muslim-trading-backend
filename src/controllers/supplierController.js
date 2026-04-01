@@ -4,6 +4,7 @@ import Sale from '../models/Sale.js';
 import StockEntry from '../models/StockEntry.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   const search = (req.query.search || '').trim();
@@ -106,13 +107,8 @@ export const getHistory = async (req, res) => {
   }
 
   const { dateFrom, dateTo } = req.query;
-  const dateFilter = {};
-  if (dateFrom) {
-    dateFilter.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-  }
-  if (dateTo) {
-    dateFilter.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-  }
+  const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
+  const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
   // 1. Define Matches
@@ -143,7 +139,7 @@ export const getHistory = async (req, res) => {
   // 3. Transform into Ledger Entries
   const ledger = [];
 
-  const startBoundary = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : null;
+  const startBoundary = dateFrom ? toUTCStartOfDay(dateFrom) : null;
   if (!dateFrom || (startBoundary && startBoundary <= new Date(supplier.createdAt))) {
     ledger.push({
       date: supplier.createdAt,

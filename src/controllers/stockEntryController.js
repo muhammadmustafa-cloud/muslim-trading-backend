@@ -2,19 +2,11 @@ import StockEntry from '../models/StockEntry.js';
 import Item from '../models/Item.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   const { dateFrom, dateTo, itemId, supplierId } = req.query;
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (itemId) filter.itemId = new mongoose.Types.ObjectId(itemId);
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
 
@@ -119,10 +111,8 @@ export const create = async (req, res) => {
   else if (paid > 0) status = 'partial';
 
   const entry = await StockEntry.create({
-    // Force PKT Offset for string dates
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    // Force UTC Offset
+    date: date ? toUTCStartOfDay(date) : toUTCStartOfDay(new Date()),
     supplierId,
     totalGrossWeight: grossTotal,
     totalSHCut: cutTotal || processedItems.reduce((sum, i) => sum + i.shCut, 0),
@@ -182,7 +172,7 @@ export const update = async (req, res) => {
   }
 
   if (date != null) {
-    entry.date = (typeof date === 'string' && date.length === 10) ? new Date(`${date}T00:00:00+05:00`) : new Date(date);
+    entry.date = toUTCStartOfDay(date);
   }
   if (supplierId != null) entry.supplierId = supplierId;
   if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
@@ -193,7 +183,7 @@ export const update = async (req, res) => {
   if (accountId !== undefined) entry.accountId = accountId || null;
   if (notes !== undefined) entry.notes = (notes || '').trim();
   if (req.body.dueDate !== undefined) {
-    entry.dueDate = (req.body.dueDate && typeof req.body.dueDate === 'string' && req.body.dueDate.length === 10) ? new Date(`${req.body.dueDate}T00:00:00+05:00`) : new Date(req.body.dueDate);
+    entry.dueDate = req.body.dueDate ? toUTCStartOfDay(req.body.dueDate) : null;
   }
   if (req.file) entry.image = req.file.filename;
 
@@ -318,7 +308,7 @@ export const payEntry = async (req, res) => {
 
   // 1. Create Transaction
   const transaction = await Transaction.create({
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date ? toUTCStartOfDay(date) : toUTCStartOfDay(new Date()),
     type: 'withdraw',
     fromAccountId: accountId,
     amount: Number(amount),

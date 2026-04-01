@@ -3,19 +3,11 @@ import MazdoorItem from '../models/MazdoorItem.js';
 import Transaction from '../models/Transaction.js';
 import { getAccountBalance } from './transactionController.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   const { dateFrom, dateTo, mazdoorId } = req.query;
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
   const expenses = await MazdoorExpense.find(filter)
@@ -62,9 +54,7 @@ export const create = async (req, res) => {
   }
 
   const transaction = await Transaction.create({
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    date: toUTCStartOfDay(date),
     type: 'withdraw',
     fromAccountId: accountId,
     toAccountId: null,
@@ -75,9 +65,7 @@ export const create = async (req, res) => {
   });
 
   const expense = await MazdoorExpense.create({
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    date: toUTCStartOfDay(date),
     mazdoorId,
     mazdoorItemId,
     bags: bagsNum,

@@ -11,16 +11,17 @@ import Item from '../models/Item.js';
 import RawMaterialHead from '../models/RawMaterialHead.js';
 import { getAccountBalance } from './transactionController.js';
 import { getCurrentStockData } from './stockController.js';
+import { toUTCStartOfDay, toUTCEndOfDay } from '../utils/dateUtils.js';
 
 export const getAuditSummary = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
     
-    // Strict Date Boundary Fix (Forcing absolute start/end of PKT (UTC+5) day)
-    const toDateStr = dateTo || new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
+    // Strict Date Boundary Fix (Forcing absolute start/end of UTC day)
+    const toDateStr = dateTo || new Date().toISOString().slice(0, 10);
     const fromDateStr = dateFrom || toDateStr;
-    const fromDate = new Date(`${fromDateStr}T00:00:00+05:00`);
-    const toDate = new Date(`${toDateStr}T23:59:59.999+05:00`);
+    const fromDate = toUTCStartOfDay(fromDateStr);
+    const toDate = toUTCEndOfDay(toDateStr);
 
     const [
       accounts,
@@ -59,7 +60,7 @@ export const getAuditSummary = async (req, res) => {
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
     // Calculate Mill Opening Balance (Pichli Wasooli) - Balance BEFORE the start of the selected range.
-    const opBalBoundary = dateFrom ? new Date(`${dateFrom}T00:00:00+05:00`) : new Date(0);
+    const opBalBoundary = dateFrom ? toUTCStartOfDay(dateFrom) : new Date(0);
 
     const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
     const millAccIds = allMillAccs.map(a => a._id);
@@ -421,12 +422,13 @@ export const getAuditSummary = async (req, res) => {
 export const getConsolidatedLedgers = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
-    const toDateStr = dateTo || new Date().toLocaleString('en-CA', { timeZone: 'Asia/Karachi' }).slice(0, 10);
+    const toDateStr = dateTo || new Date().toISOString().slice(0, 10);
     const fromDateStr = dateFrom || toDateStr;
-    const fromDate = new Date(`${fromDateStr}T00:00:00+05:00`);
-    const toDate = new Date(`${toDateStr}T23:59:59.999+05:00`);
+    const fromDate = toUTCStartOfDay(fromDateStr);
+    const toDate = toUTCEndOfDay(toDateStr);
 
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
+
 
     // 1. Identify all active entities in this range
     const [

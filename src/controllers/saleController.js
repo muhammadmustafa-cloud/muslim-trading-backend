@@ -3,6 +3,7 @@ import StockEntry from '../models/StockEntry.js';
 import Item from '../models/Item.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 async function getAvailableQuantity(itemId, excludeSaleId = null) {
   const itemObjId = new mongoose.Types.ObjectId(itemId);
@@ -45,16 +46,7 @@ export const getAvailable = async (req, res) => {
 
 export const list = async (req, res) => {
   const { dateFrom, dateTo, customerId, itemId } = req.query;
-  const filter = {};
-  if (dateFrom || dateTo) {
-    filter.date = {};
-    if (dateFrom) {
-      filter.date.$gte = new Date(`${dateFrom}T00:00:00+05:00`);
-    }
-    if (dateTo) {
-      filter.date.$lte = new Date(`${dateTo}T23:59:59.999+05:00`);
-    }
-  }
+  const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (customerId) filter.customerId = new mongoose.Types.ObjectId(customerId);
   if (itemId) filter.itemId = new mongoose.Types.ObjectId(itemId);
 
@@ -187,10 +179,8 @@ export const create = async (req, res) => {
   else if (received > 0) paymentStatus = 'partial';
 
   const sale = await Sale.create({
-    // Force PKT Offset for string dates
-    date: date 
-      ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) 
-      : new Date(),
+    // Force UTC Offset
+    date: date ? toUTCStartOfDay(date) : toUTCStartOfDay(new Date()),
     customerId,
     totalGrossWeight: grossTotal,
     totalSHCut: cutTotal,
@@ -250,7 +240,7 @@ export const update = async (req, res) => {
   }
 
   if (date != null) {
-    sale.date = (typeof date === 'string' && date.length === 10) ? new Date(`${date}T00:00:00+05:00`) : new Date(date);
+    sale.date = toUTCStartOfDay(date);
   }
   if (customerId != null) sale.customerId = customerId;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
@@ -419,7 +409,7 @@ export const collectPayment = async (req, res) => {
   // Payment logic using global Transaction import
 
   const transaction = await Transaction.create({
-    date: date ? (typeof date === 'string' && date.length === 10 ? new Date(`${date}T00:00:00+05:00`) : new Date(date)) : new Date(),
+    date: date ? toUTCStartOfDay(date) : toUTCStartOfDay(new Date()),
     type: 'deposit',
     fromAccountId: null,
     toAccountId: accountId,
