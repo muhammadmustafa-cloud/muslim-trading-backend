@@ -94,7 +94,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
   
   // Parse items if they come as a JSON string (typical for FormData)
   if (typeof items === 'string') {
@@ -153,13 +153,17 @@ export const create = async (req, res) => {
       bardanaRate: bRate,
       bardanaAmount: bardana,
       mazdori,
-      totalAmount: lineTotal
+      totalAmount: lineTotal,
+      deductionKg: Number(item.deductionKg) || 0
     };
   });
 
+  const parsedExtras = Number(extras) || 0;
+  const finalTotalAmount = Math.max(0, grandTotalAmount - parsedExtras);
+
   const received = Number(amountReceived) || 0;
   let paymentStatus = 'pending';
-  if (grandTotalAmount > 0 && received >= grandTotalAmount) paymentStatus = 'paid';
+  if (finalTotalAmount > 0 && received >= finalTotalAmount) paymentStatus = 'paid';
   else if (received > 0) paymentStatus = 'partial';
 
   const sale = await Sale.create({
@@ -176,7 +180,8 @@ export const create = async (req, res) => {
     gatePassNo: (gatePassNo || '').trim(),
     goods: (goods || '').trim(),
     amountReceived: received,
-    totalAmount: grandTotalAmount,
+    extras: parsedExtras,
+    totalAmount: finalTotalAmount,
     accountId: accountId || null,
     notes: (notes || '').trim(),
     dueDate: dueDate ? new Date(dueDate) : null,
@@ -214,7 +219,7 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
 
-  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
 
   if (typeof items === 'string') {
     try {
@@ -282,11 +287,17 @@ export const update = async (req, res) => {
         bardanaRate: bRate,
         bardanaAmount: bardana,
         mazdori,
-        totalAmount: lineTotal
+        totalAmount: lineTotal,
+        deductionKg: Number(item.deductionKg) || 0
       };
     });
-    sale.totalAmount = grandTotalAmount;
   }
+
+  if (extras !== undefined) sale.extras = Number(extras) || 0;
+
+  // Recalculate true total amount factoring in extras
+  const currentGrandTotal = sale.items.reduce((sum, item) => sum + (Number(item.totalAmount) || 0), 0);
+  sale.totalAmount = Math.max(0, currentGrandTotal - (sale.extras || 0));
 
   if (amountReceived != null) sale.amountReceived = Number(amountReceived);
 

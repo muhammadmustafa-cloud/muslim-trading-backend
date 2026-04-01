@@ -53,7 +53,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, extras, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
   
   if (typeof items === 'string') {
     try {
@@ -105,13 +105,17 @@ export const create = async (req, res) => {
       itemNetWeight: lineNet,
       rate: r,
       bardanaAmount: bardana,
-      amount: lineTotal
+      amount: lineTotal,
+      deductionKg: Number(item.deductionKg) || 0
     };
   });
 
+  const parsedExtras = Number(extras) || 0;
+  const finalTotalAmount = Math.max(0, grandTotalAmount - parsedExtras);
+
   const paid = Number(amountPaid) || 0;
   let status = 'pending';
-  if (paid >= grandTotalAmount && grandTotalAmount > 0) status = 'paid';
+  if (paid >= finalTotalAmount && finalTotalAmount > 0) status = 'paid';
   else if (paid > 0) status = 'partial';
 
   const entry = await StockEntry.create({
@@ -126,7 +130,8 @@ export const create = async (req, res) => {
     items: processedItems,
     millWeight: Number(millWeight) || 0,
     supplierWeight: Number(supplierWeight) || 0,
-    amount: grandTotalAmount,
+    amount: finalTotalAmount,
+    extras: parsedExtras,
     amountPaid: paid,
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus: status,
@@ -166,7 +171,7 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
   
-  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, extras, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
 
   if (typeof items === 'string') {
     try {
@@ -233,11 +238,17 @@ export const update = async (req, res) => {
         itemNetWeight: lineNet,
         rate: r,
         bardanaAmount: bardana,
-        amount: lineTotal
+        amount: lineTotal,
+        deductionKg: Number(item.deductionKg) || 0
       };
     });
-    entry.amount = grandTotalAmount;
   }
+
+  if (extras !== undefined) entry.extras = Number(extras) || 0;
+
+  // Recalculate true total amount factoring in extras
+  const currentGrandTotal = entry.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  entry.amount = Math.max(0, currentGrandTotal - (entry.extras || 0));
 
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
 

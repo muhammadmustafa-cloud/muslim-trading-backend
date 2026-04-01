@@ -21,7 +21,8 @@ const saleSchema = new mongoose.Schema(
       bardanaRate: { type: Number, default: 0 },
       bardanaAmount: { type: Number, default: 0 },
       mazdori: { type: Number, default: 0 },
-      totalAmount: { type: Number, default: 0 }
+      totalAmount: { type: Number, default: 0 },
+      deductionKg: { type: Number, default: 0 }
     }],
 
     truckNumber: { type: String, trim: true, default: '' },
@@ -30,6 +31,7 @@ const saleSchema = new mongoose.Schema(
     image: { type: String, default: null },
     
     amountReceived: { type: Number, default: 0 },
+    extras: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 }, // Grand total sum of all items
     
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },

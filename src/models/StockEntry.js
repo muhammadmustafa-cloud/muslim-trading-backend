@@ -19,13 +19,15 @@ const stockEntrySchema = new mongoose.Schema(
       itemNetWeight: { type: Number, default: 0 }, // Individual line Net (kg)
       rate: { type: Number, default: 0 },          // Rate per MUN (40kg)
       bardanaAmount: { type: Number, default: 0 },
-      amount: { type: Number, default: 0 }
+      amount: { type: Number, default: 0 },
+      deductionKg: { type: Number, default: 0 }
     }],
 
     millWeight: { type: Number, default: 0 },
     supplierWeight: { type: Number, default: 0 },
     
     amountPaid: { type: Number, default: 0 },
+    extras: { type: Number, default: 0 },
     amount: { type: Number, default: 0 }, // Grand total sum of all items
 
     dueDate: { type: Date, default: null },
