@@ -87,12 +87,28 @@ export const getDailyMemo = async (req, res) => {
                   { $and: [!!accountId, { $ne: ["$type", "transfer"] }, { $eq: ["$toAccountId", new mongoose.Types.ObjectId(accountId)] }] },
                   { $and: [!!accountId, { $eq: ["$type", "transfer"] }, { $eq: ["$fromAccountId", new mongoose.Types.ObjectId(accountId)] }] },
                   // Case B: Full Mill Summary + money entered ANY Mill Account
-                  // (Note: Internal transfers cancel out mathematically in Full Mill view)
+                  // (Internal transfers cancel out; external toAccount handled separately)
                   { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ["$toAccountId", millAccObjectIdIds] }] },
                   // Case C: Party ledgers
                   { $and: [!!customerId, { $eq: ["$type", "deposit"] }] },
                   { $and: [!!supplierId, { $eq: ["$type", "deposit"] }] },
                   { $and: [!!mazdoorId, { $eq: ["$category", "salary_accrual"] }] },
+                  /**
+                   * Case D: Mill → External (Bank) Transfer → Count in Credit (totalIn)
+                   * Scenario: Mill Khata sends money to a Bank Account.
+                   * fromAccountId = Mill ✅ (already in totalOut)
+                   * toAccountId   = Bank ❌ (not a mill account)
+                   * We explicitly credit it here so the gross transfer is visible on BOTH sides.
+                   * Net closing balance is unaffected (totalIn & totalOut both +amount → cancel).
+                   */
+                  {
+                    $and: [
+                      !accountId && !customerId && !supplierId && !mazdoorId, // Full Mill view only
+                      { $eq: ["$type", "transfer"] },
+                      { $in: ["$fromAccountId", millAccObjectIdIds] },        // FROM a mill account
+                      { $not: { $in: ["$toAccountId", millAccObjectIdIds] } } // TO an external (bank) account
+                    ]
+                  },
                 ],
               },
               "$amount",
@@ -317,11 +333,25 @@ transactions.forEach(t => {
             $cond: [
               {
                 $or: [
-                  // Same logic jo tum prevTransactions me use kar rahe ho
+                  // Case A: Specific account filter
                   { $and: [!!accountId, { $eq: ["$toAccountId", new mongoose.Types.ObjectId(accountId)] }] },
+                  // Case B: Full Mill — money entered any mill account
                   { $and: [!accountId, { $in: ["$toAccountId", millAccObjectIdIds] }] },
+                  // Case C: Party ledgers
                   { $and: [!!customerId, { $eq: ["$type", "deposit"] }] },
                   { $and: [!!supplierId, { $eq: ["$type", "deposit"] }] },
+                  /**
+                   * Case D: Mill → External (Bank) Transfer → Count in Credit (totalIn)
+                   * Mirrors the same Case D logic in prevTransactions above.
+                   */
+                  {
+                    $and: [
+                      !accountId && !customerId && !supplierId && !mazdoorId,
+                      { $eq: ["$type", "transfer"] },
+                      { $in: ["$fromAccountId", millAccObjectIdIds] },
+                      { $not: { $in: ["$toAccountId", millAccObjectIdIds] } }
+                    ]
+                  },
                 ],
               },
               "$amount",
