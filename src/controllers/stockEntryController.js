@@ -45,7 +45,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, extras, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, totalBardanaAmount, totalMazdori, extras, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
   
   if (typeof items === 'string') {
     try {
@@ -65,7 +65,9 @@ export const create = async (req, res) => {
   const processedItems = items.map(item => {
     const k = Number(item.kattay) || 0;
     const kg = Number(item.kgPerKata) || 0;
-    const lineGross = Number(item.grossWeight) || (k * kg);
+    const dKg = Number(item.deductionKg) || 0;
+    const aKg = Number(item.addKg) || 0;
+    const lineGross = Number(item.grossWeight) || Math.max(0, (k * kg) - dKg + aKg);
     
     // Proportional SH Cut OR Standard 0.25kg rule
     let lineSHCut = 0;
@@ -81,7 +83,7 @@ export const create = async (req, res) => {
     
     let lineTotal = 0;
     if (lineNet > 0 && r > 0) {
-      lineTotal = Math.round((lineNet / 40) * r) + bardana;
+      lineTotal = Math.round((lineNet / 40) * r);
     } else {
       lineTotal = Number(item.amount) || 0;
     }
@@ -92,18 +94,18 @@ export const create = async (req, res) => {
       itemId: item.itemId,
       kattay: k,
       kgPerKata: kg,
+      deductionKg: dKg,
+      addKg: aKg,
       grossWeight: lineGross,
       shCut: lineSHCut,
       itemNetWeight: lineNet,
       rate: r,
-      bardanaAmount: bardana,
-      amount: lineTotal,
-      deductionKg: Number(item.deductionKg) || 0
+      amount: lineTotal
     };
   });
 
   const parsedExtras = Number(extras) || 0;
-  const finalTotalAmount = Math.max(0, grandTotalAmount - parsedExtras);
+  const finalTotalAmount = Math.max(0, grandTotalAmount + (Number(totalBardanaAmount) || 0) + (Number(totalMazdori) || 0) - parsedExtras);
 
   const paid = Number(amountPaid) || 0;
   let status = 'pending';
@@ -121,6 +123,8 @@ export const create = async (req, res) => {
     millWeight: Number(millWeight) || 0,
     supplierWeight: Number(supplierWeight) || 0,
     amount: finalTotalAmount,
+    totalBardanaAmount: Number(totalBardanaAmount) || 0,
+    totalMazdori: Number(totalMazdori) || 0,
     extras: parsedExtras,
     amountPaid: paid,
     dueDate: dueDate ? new Date(dueDate) : null,
@@ -161,7 +165,7 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
   
-  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, extras, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
 
   if (typeof items === 'string') {
     try {
@@ -175,6 +179,10 @@ export const update = async (req, res) => {
     entry.date = toUTCStartOfDay(date);
   }
   if (supplierId != null) entry.supplierId = supplierId;
+  if (amountPaid !== undefined) entry.amountPaid = Number(amountPaid) || 0;
+  if (totalBardanaAmount !== undefined) entry.totalBardanaAmount = Number(totalBardanaAmount) || 0;
+  if (totalMazdori !== undefined) entry.totalMazdori = Number(totalMazdori) || 0;
+  if (extras !== undefined) entry.extras = Number(extras) || 0;
   if (truckNumber !== undefined) entry.truckNumber = (truckNumber || '').trim();
   if (gatePassNo !== undefined) entry.gatePassNo = (gatePassNo || '').trim();
   if (goods !== undefined) entry.goods = (goods || '').trim();
@@ -198,7 +206,9 @@ export const update = async (req, res) => {
     entry.items = items.map(item => {
       const k = Number(item.kattay) || 0;
       const kg = Number(item.kgPerKata) || 0;
-      const lineGross = Number(item.grossWeight) || (k * kg);
+      const dKg = Number(item.deductionKg) || 0;
+      const aKg = Number(item.addKg) || 0;
+      const lineGross = Number(item.grossWeight) || Math.max(0, (k * kg) - dKg + aKg);
       
       let lineSHCut = 0;
       if (cutTotal > 0 && grossTotal > 0) {
@@ -213,7 +223,7 @@ export const update = async (req, res) => {
       
       let lineTotal = 0;
       if (lineNet > 0 && r > 0) {
-        lineTotal = Math.round((lineNet / 40) * r) + bardana;
+        lineTotal = Math.round((lineNet / 40) * r);
       } else {
         lineTotal = Number(item.amount) || 0;
       }
@@ -223,22 +233,22 @@ export const update = async (req, res) => {
         itemId: item.itemId,
         kattay: k,
         kgPerKata: kg,
+        deductionKg: dKg,
+        addKg: aKg,
         grossWeight: lineGross,
         shCut: lineSHCut,
         itemNetWeight: lineNet,
         rate: r,
-        bardanaAmount: bardana,
-        amount: lineTotal,
-        deductionKg: Number(item.deductionKg) || 0
+        amount: lineTotal
       };
     });
   }
 
   if (extras !== undefined) entry.extras = Number(extras) || 0;
 
-  // Recalculate true total amount factoring in extras
+  // Recalculate true total amount factoring in extras, bardana, and mazdori
   const currentGrandTotal = entry.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  entry.amount = Math.max(0, currentGrandTotal - (entry.extras || 0));
+  entry.amount = Math.max(0, currentGrandTotal + (entry.totalBardanaAmount || 0) + (entry.totalMazdori || 0) - (entry.extras || 0));
 
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
 
@@ -259,6 +269,7 @@ export const update = async (req, res) => {
       linkedTrans.amount = entry.amountPaid;
       linkedTrans.fromAccountId = entry.accountId;
       linkedTrans.date = entry.date;
+      linkedTrans.supplierId = entry.supplierId; // Fixed: Sync SupplierId
       await linkedTrans.save();
     } else {
       await Transaction.findByIdAndDelete(linkedTrans._id);

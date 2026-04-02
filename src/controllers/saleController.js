@@ -86,7 +86,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
   
   // Parse items if they come as a JSON string (typical for FormData)
   if (typeof items === 'string') {
@@ -105,7 +105,10 @@ export const create = async (req, res) => {
   const sumLineGross = items.reduce((sum, item) => {
     const k = Number(item.kattay) || 0;
     const kpk = Number(item.kgPerKata) || 0;
-    return sum + ((k * kpk) || Number(item.grossWeight) || 0);
+    const dKg = Number(item.deductionKg) || 0;
+    const aKg = Number(item.addKg) || 0;
+    const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg + aKg);
+    return sum + lineGross;
   }, 0);
 
   // 1. Base Item Processing (Gross, S.H Cut, Initial Total)
@@ -113,9 +116,10 @@ export const create = async (req, res) => {
     const k = Number(item.kattay) || 0;
     const kpk = Number(item.kgPerKata) || 0;
     const dKg = Number(item.deductionKg) || 0;
+    const aKg = Number(item.addKg) || 0;
     
-    // Line Gross logic: if manual grossWeight provided use it, otherwise (k * kpk) - dKg
-    const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg);
+    // Line Gross logic: if manual grossWeight provided use it, otherwise (k * kpk) - dKg + aKg
+    const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg + aKg);
     
     // Proportional SH Cut splitting based on ACTUAL line weights sum
     const lineSHCut = sumLineGross > 0 ? (lineGross / sumLineGross) * cutTotal : 0;
@@ -128,9 +132,9 @@ export const create = async (req, res) => {
     
     let lineTotal = 0;
     if (lineNet > 0 && rate > 0) {
-      lineTotal = Math.round((lineNet / 40) * rate) + bardana + mazdori;
+      lineTotal = Math.round((lineNet / 40) * rate);
     } else {
-      lineTotal = (Number(item.totalAmount) || 0) + bardana + mazdori;
+      lineTotal = (Number(item.totalAmount) || 0);
     }
 
     return {
@@ -138,13 +142,11 @@ export const create = async (req, res) => {
       kattay: k,
       kgPerKata: kpk,
       deductionKg: dKg,
+      addKg: aKg,
       grossWeight: lineGross,
       shCut: lineSHCut,
       quantity: lineNet,
       rate,
-      bardanaRate: bRate,
-      bardanaAmount: bardana,
-      mazdori,
       totalAmount: lineTotal
     };
   });
@@ -171,7 +173,7 @@ export const create = async (req, res) => {
     };
   });
 
-  const finalTotalAmount = finalGrandTotalAmount;
+  const finalTotalAmount = Math.max(0, finalGrandTotalAmount + (Number(totalBardanaAmount) || 0) + (Number(totalMazdori) || 0));
 
   const received = Number(amountReceived) || 0;
   let paymentStatus = 'pending';
@@ -229,7 +231,7 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
 
-  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
 
   if (typeof items === 'string') {
     try {
@@ -243,6 +245,10 @@ export const update = async (req, res) => {
     sale.date = toUTCStartOfDay(date);
   }
   if (customerId != null) sale.customerId = customerId;
+  if (amountReceived !== undefined) sale.amountReceived = Number(amountReceived) || 0;
+  if (totalBardanaAmount !== undefined) sale.totalBardanaAmount = Number(totalBardanaAmount) || 0;
+  if (totalMazdori !== undefined) sale.totalMazdori = Number(totalMazdori) || 0;
+  if (extras !== undefined) sale.extras = Number(extras) || 0;
   if (truckNumber !== undefined) sale.truckNumber = (truckNumber || '').trim();
   if (gatePassNo !== undefined) sale.gatePassNo = (gatePassNo || '').trim();
   if (goods !== undefined) sale.goods = (goods || '').trim();
@@ -261,15 +267,19 @@ export const update = async (req, res) => {
     const sumLineGross = items.reduce((sum, item) => {
       const k = Number(item.kattay) || 0;
       const kpk = Number(item.kgPerKata) || 0;
-      return sum + ((k * kpk) || Number(item.grossWeight) || 0);
+      const dKg = Number(item.deductionKg) || 0;
+      const aKg = Number(item.addKg) || 0;
+      const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg + aKg);
+      return sum + lineGross;
     }, 0);
 
     const baseProcessedItems = items.map(item => {
       const k = Number(item.kattay) || 0;
       const kpk = Number(item.kgPerKata) || 0;
       const dKg = Number(item.deductionKg) || 0;
+      const aKg = Number(item.addKg) || 0;
       
-      const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg);
+      const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg + aKg);
       
       const lineSHCut = sumLineGross > 0 ? (lineGross / sumLineGross) * cutTotal : 0;
       const lineNet = Math.max(0, lineGross - lineSHCut);
@@ -281,9 +291,9 @@ export const update = async (req, res) => {
       
       let lineTotal = 0;
       if (lineNet > 0 && rate > 0) {
-        lineTotal = Math.round((lineNet / 40) * rate) + bardana + mazdori;
+        lineTotal = Math.round((lineNet / 40) * rate);
       } else {
-        lineTotal = (Number(item.totalAmount) || 0) + bardana + mazdori;
+        lineTotal = (Number(item.totalAmount) || 0);
       }
 
       return {
@@ -291,13 +301,10 @@ export const update = async (req, res) => {
         kattay: k,
         kgPerKata: kpk,
         deductionKg: dKg,
+        addKg: aKg,
         grossWeight: lineGross,
-        shCut: lineSHCut,
         quantity: lineNet,
         rate,
-        bardanaRate: bRate,
-        bardanaAmount: bardana,
-        mazdori,
         totalAmount: lineTotal
       };
     });
@@ -321,22 +328,20 @@ export const update = async (req, res) => {
       };
     });
 
-    sale.totalAmount = grandTotalAmountAfterExtras;
+    sale.totalAmount = Math.max(0, grandTotalAmountAfterExtras + (sale.totalBardanaAmount || 0) + (sale.totalMazdori || 0));
   } else {
     // If items aren't updated, but extras is:
     if (extras !== undefined) {
-      sale.extras = Number(extras) || 0;
-      // Re-calculate distribution based on existing items
-      const totalInvoiceMun = sale.items.reduce((sum, it) => sum + (it.quantity / 40), 0);
-      const extraPerMun = totalInvoiceMun > 0 ? (sale.extras / totalInvoiceMun) : 0;
+      const oldExtras = sale.extras || 0;
+      const newExtras = Number(extras) || 0;
+      sale.extras = newExtras;
       
-      let grandTotalAmountAfterExtras = 0;
-      sale.items = sale.items.map(item => {
-        // Note: we'd need the base price here, but in update we might only have adjusted price.
-        // It's safer if the user re-sends items on update (which the frontend does).
-        // For simplicity, we assume items are present as per the frontend handleSubmit.
-        return item; 
-      });
+      // Since we don't have the original base prices for the already-saved items in this block, 
+      // we rely on the totalAmount already having been adjusted. 
+      // Re-calculating correctly requires base prices. 
+      // HOWEVER, the frontend ALWAYS sends items, so the 'if' block above is the primary path.
+      // We adjust the grand total proportionally to the change in extras as a fallback.
+      sale.totalAmount = Math.max(0, (sale.items.reduce((sum, it) => sum + (it.totalAmount || 0), 0) + oldExtras) - newExtras);
     }
   }
 
@@ -356,6 +361,7 @@ export const update = async (req, res) => {
       linkedTrans.amount = sale.amountReceived;
       linkedTrans.toAccountId = sale.accountId;
       linkedTrans.date = sale.date;
+      linkedTrans.customerId = sale.customerId; // Fixed: Sync CustomerId
       await linkedTrans.save();
     } else {
       await Transaction.findByIdAndDelete(linkedTrans._id);

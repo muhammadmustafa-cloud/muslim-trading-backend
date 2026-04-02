@@ -20,15 +20,18 @@ const stockEntrySchema = new mongoose.Schema(
       rate: { type: Number, default: 0 },          // Rate per MUN (40kg)
       bardanaAmount: { type: Number, default: 0 },
       amount: { type: Number, default: 0 },
-      deductionKg: { type: Number, default: 0 }
+      deductionKg: { type: Number, default: 0 },
+      addKg: { type: Number, default: 0 }
     }],
 
     millWeight: { type: Number, default: 0 },
     supplierWeight: { type: Number, default: 0 },
     
     amountPaid: { type: Number, default: 0 },
+    totalBardanaAmount: { type: Number, default: 0 },
+    totalMazdori: { type: Number, default: 0 },
     extras: { type: Number, default: 0 },
-    amount: { type: Number, default: 0 }, // Grand total sum of all items
+    amount: { type: Number, default: 0 }, // Grand total sum of all items + bardana + mazdori - extras
 
     dueDate: { type: Date, default: null },
     paymentStatus: { type: String, enum: ['pending', 'partial', 'paid'], default: 'pending' },
