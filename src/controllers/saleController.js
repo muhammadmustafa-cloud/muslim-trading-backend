@@ -192,6 +192,8 @@ export const create = async (req, res) => {
     gatePassNo: (gatePassNo || '').trim(),
     goods: (goods || '').trim(),
     amountReceived: received,
+    totalBardanaAmount: Number(totalBardanaAmount) || 0,
+    totalMazdori: Number(totalMazdori) || 0,
     extras: parsedExtras,
     totalAmount: finalTotalAmount,
     accountId: accountId || null,
