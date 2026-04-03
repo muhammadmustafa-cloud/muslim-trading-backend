@@ -74,9 +74,9 @@ export const getAuditSummary = async (req, res) => {
           totalIn: { 
             $sum: { 
               $cond: [
-                { $or: [
-                  { $and: [{ $ne: ['$type', 'transfer'] }, { $in: ['$toAccountId', millAccIds] }] },
-                  { $and: [{ $eq: ['$type', 'transfer'] }, { $in: ['$fromAccountId', millAccIds] }] }
+                { $and: [
+                  { $in: ['$toAccountId', millAccIds] }, // Entering Mill
+                  { $not: { $in: ['$fromAccountId', millAccIds] } } // Not from another Mill
                 ]}, 
                 '$amount', 
                 0
@@ -86,9 +86,9 @@ export const getAuditSummary = async (req, res) => {
           totalOut: { 
             $sum: { 
               $cond: [
-                { $or: [
-                  { $and: [{ $ne: ['$type', 'transfer'] }, { $in: ['$fromAccountId', millAccIds] }] },
-                  { $and: [{ $eq: ['$type', 'transfer'] }, { $in: ['$toAccountId', millAccIds] }] }
+                { $and: [
+                  { $in: ['$fromAccountId', millAccIds] }, // Leaving Mill
+                  { $not: { $in: ['$toAccountId', millAccIds] } } // Not to another Mill
                 ]}, 
                 '$amount', 
                 0
@@ -109,30 +109,8 @@ export const getAuditSummary = async (req, res) => {
         { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
         { $group: {
           _id: null,
-          totalIn: { 
-            $sum: { 
-              $cond: [
-                { $or: [
-                  { $and: [{ $ne: ['$type', 'transfer'] }, { $eq: ['$toAccountId', a._id] }] },
-                  { $and: [{ $eq: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', a._id] }] }
-                ]}, 
-                '$amount', 
-                0
-              ] 
-            } 
-          },
-          totalOut: { 
-            $sum: { 
-              $cond: [
-                { $or: [
-                  { $and: [{ $ne: ['$type', 'transfer'] }, { $eq: ['$fromAccountId', a._id] }] },
-                  { $and: [{ $eq: ['$type', 'transfer'] }, { $eq: ['$toAccountId', a._id] }] }
-                ]}, 
-                '$amount', 
-                0
-              ] 
-            } 
-          }
+          totalIn:  { $sum: { $cond: [{ $eq: ['$toAccountId',   a._id] }, '$amount', 0] } },
+          totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
         }}
       ]);
 
