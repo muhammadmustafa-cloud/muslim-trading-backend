@@ -316,9 +316,42 @@ transactions.forEach(t => {
         });
       }
     } else if (type === "transfer") {
-      // Internal transfers always show Aamne-Samne (Source=In/Aamad, Destination=Out/Kharch)
-      rows.push({ type: "transfer_out", date: formatDateOnly(t.date), name: t.fromAccountId?.name || "Account", description: `Transfer to ${t.toAccountId?.name || "—"}`, accountName: t.fromAccountId?.name || "Manual", amount: t.amount, amountType: "in", isExternal, referenceId: t._id });
-      rows.push({ type: "transfer_in", date: formatDateOnly(t.date), name: t.toAccountId?.name || "Account", description: `Transfer from ${t.fromAccountId?.name || "—"}`, accountName: t.toAccountId?.name || "Manual", amount: t.amount, amountType: "out", isExternal, referenceId: t._id });
+      const isPartyTransfer = t.customerId && (t.supplierId || t.mazdoorId);
+
+      if (isPartyTransfer) {
+        const customerName = t.customerId.name || "Customer";
+        const recipientName = t.supplierId?.name || t.mazdoorId?.name || "Recipient";
+
+        // 1. Source Side (Credit / Aamad)
+        rows.push({
+          type: "transfer_in",
+          date: formatDateOnly(t.date),
+          name: `Direct Transfer to ${recipientName}`,
+          description: t.note || "Party-to-Party Transfer",
+          accountName: customerName,
+          amount: t.amount,
+          amountType: "in",
+          isExternal: false, // Internal to the ledger ecosystem
+          referenceId: t._id
+        });
+
+        // 2. Destination Side (Debit / Kharch)
+        rows.push({
+          type: "transfer_out",
+          date: formatDateOnly(t.date),
+          name: `Direct Transfer from ${customerName}`,
+          description: t.note || "Party-to-Party Transfer",
+          accountName: recipientName,
+          amount: t.amount,
+          amountType: "out",
+          isExternal: false,
+          referenceId: t._id
+        });
+      } else {
+        // Internal standard account-to-account transfers
+        rows.push({ type: "transfer_out", date: formatDateOnly(t.date), name: t.fromAccountId?.name || "Account", description: `Transfer to ${t.toAccountId?.name || "—"}`, accountName: t.fromAccountId?.name || "Manual", amount: t.amount, amountType: "in", isExternal, referenceId: t._id });
+        rows.push({ type: "transfer_in", date: formatDateOnly(t.date), name: t.toAccountId?.name || "Account", description: `Transfer from ${t.fromAccountId?.name || "—"}`, accountName: t.toAccountId?.name || "Manual", amount: t.amount, amountType: "out", isExternal, referenceId: t._id });
+      }
     }
   });
 

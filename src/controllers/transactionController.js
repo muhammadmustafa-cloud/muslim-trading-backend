@@ -229,10 +229,17 @@ export const create = async (req, res) => {
   if (type === 'salary') {
     if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for salary' });
   }
+
   if (type === 'transfer') {
-    if (!fromAccountId || !toAccountId) return res.status(400).json({ success: false, message: 'fromAccountId and toAccountId required for transfer' });
-    if (fromAccountId === toAccountId) return res.status(400).json({ success: false, message: 'Cannot transfer to same account' });
+    const isPartyTransfer = customerId && (supplierId || mazdoorId);
+    if (!isPartyTransfer && (!fromAccountId || !toAccountId)) {
+      return res.status(400).json({ success: false, message: 'fromAccountId and toAccountId required for standard transfer' });
+    }
+    if (fromAccountId && toAccountId && fromAccountId === toAccountId) {
+      return res.status(400).json({ success: false, message: 'Cannot transfer to same account' });
+    }
   }
+
   if (type === 'accrual') {
     if (!mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for accrual' });
   }

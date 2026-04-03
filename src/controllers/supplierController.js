@@ -205,7 +205,7 @@ export const getHistory = async (req, res) => {
   uniquePayments.forEach(p => {
     // If withdraw (we paid them) -> Debit
     // If deposit (they paid us - if linked) -> Credit
-    const isDebit = p.type === 'withdraw';
+    const isDebit = p.type === 'withdraw' || p.type === 'transfer';
     ledger.push({
       date: p.date,
       description: `Payment: ${p.note || (isDebit ? 'Paid to Supplier' : 'Received')}`,

@@ -140,9 +140,10 @@ export const getAuditSummary = async (req, res) => {
       { $match: { ...snapshotMatch, customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
-        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$supplierId', null] }] }] }, '$amount', 0] } },
         totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
       } }
+
     ]);
     const customerSales = await Sale.aggregate([
        { $match: snapshotMatch },
@@ -154,7 +155,7 @@ export const getAuditSummary = async (req, res) => {
       { $match: { ...periodMatch, customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
-        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$supplierId', null] }] }] }, '$amount', 0] } },
         totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
       } }
     ]);
@@ -189,8 +190,9 @@ export const getAuditSummary = async (req, res) => {
       { $group: { 
         _id: '$supplierId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
       } }
+
     ]);
     const supplierPurchases = await StockEntry.aggregate([
       { $match: snapshotMatch },
@@ -202,7 +204,7 @@ export const getAuditSummary = async (req, res) => {
       { $group: { 
         _id: '$supplierId', 
         totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
       } }
     ]);
     const periodSupplierPurchases = await StockEntry.aggregate([
@@ -234,16 +236,17 @@ export const getAuditSummary = async (req, res) => {
       { $match: { ...snapshotMatch, mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
-        paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
+        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary']] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
         earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
       }}
+
     ]);
 
     const periodMazdoorTrans = await Transaction.aggregate([
       { $match: { ...periodMatch, mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
-        paid: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary']] }, '$amount', 0] } },
+        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary']] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
         earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
       }}
     ]);

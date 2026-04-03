@@ -81,7 +81,7 @@ export const getHistory = async (req, res) => {
   // Note: MazdoorExpense records work earn but also usually matches a "withdraw" transaction 
   // if paid immediately. To avoid double counting for "Total Paid", we use Transaction.
   
-  const totalPaid = transactions.filter((t) => t.type === 'withdraw' || t.type === 'salary').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const totalPaid = transactions.filter((t) => t.type === 'withdraw' || t.type === 'salary' || t.type === 'transfer').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   const totalReceived = transactions.filter((t) => t.type === 'deposit' && t.category === 'udhaar_received').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   
   // Salary Accruals + Daily Wages (Credits)
