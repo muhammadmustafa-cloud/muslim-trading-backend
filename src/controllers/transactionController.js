@@ -232,7 +232,8 @@ export const create = async (req, res) => {
 
   if (type === 'transfer') {
     const isPartyTransfer = customerId && (supplierId || mazdoorId);
-    if (!isPartyTransfer && (!fromAccountId || !toAccountId)) {
+    const isMillToSupplierTransfer = fromAccountId && (supplierId || mazdoorId);
+    if (!isPartyTransfer && !isMillToSupplierTransfer && (!fromAccountId || !toAccountId)) {
       return res.status(400).json({ success: false, message: 'fromAccountId and toAccountId required for standard transfer' });
     }
     if (fromAccountId && toAccountId && fromAccountId === toAccountId) {

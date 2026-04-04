@@ -422,6 +422,7 @@ export const getAuditSummary = async (req, res) => {
                   $or: [
                     { $in: ['$toAccountId', millAccIds] },
                     { 
+                      // HACK: Mill to Bank Transfer counts as Inflow (keeps balance same as Universal Ledger)
                       $and: [
                         { $eq: ['$type', 'transfer'] },
                         { $in: ['$fromAccountId', millAccIds] },
