@@ -114,23 +114,27 @@ export const getAuditSummary = async (req, res) => {
         }}
       ]);
 
-      const tIn = periodTrans[0]?.totalIn || 0;
-      const tOut = periodTrans[0]?.totalOut || 0;
+    const tIn = periodTrans[0]?.totalIn || 0;
+const tOut = periodTrans[0]?.totalOut || 0;
 
-      // Point-in-Time Balance calculation (Snapshot as of toDate)
-      const flow = await getAccountBalance(a._id, toDate);
-      const balance = (a.openingBalance ?? 0) + flow;
+// All-time balance (UI ke liye)
+const flow = await getAccountBalance(a._id, toDate);
+const balance = (a.openingBalance ?? 0) + flow;
 
-      totalCash += balance;
-      accountDetails.push({ 
-        _id: a._id,
-        name: a.name, 
-        balance, 
-        totalIn: tIn, 
-        totalOut: tOut,
-        isDailyKhata: !!a.isDailyKhata,
-        isMillKhata: !!a.isMillKhata
-      });
+// Period-only net movement (PDF ke liye)
+const periodBalance = tIn - tOut;
+
+totalCash += balance;
+accountDetails.push({ 
+  _id: a._id,
+  name: a.name, 
+  balance,           // UI mein dikhta rahega
+  periodBalance,     // PDF mein yeh use hoga
+  totalIn: tIn, 
+  totalOut: tOut,
+  isDailyKhata: !!a.isDailyKhata,
+  isMillKhata: !!a.isMillKhata
+});
     }
 
     // 2. Detailed Customer Balances (Point-in-Time Snapshot)
