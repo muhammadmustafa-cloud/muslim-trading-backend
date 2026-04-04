@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { config } from './config/index.js';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import logger from './utils/logger.js';
+import { tenantMiddleware } from './middleware/tenantMiddleware.js';
 import routes from './routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,8 +39,8 @@ if (config.env !== 'test') {
 // Serve static uploaded files (images)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// API routes
-app.use('/api', routes);
+// API routes with Multi-Tenant Support
+app.use('/api', tenantMiddleware, routes);
 
 // Health check
 app.get('/health', (req, res) => {

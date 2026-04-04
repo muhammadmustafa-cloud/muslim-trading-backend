@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const transactionSchema = new mongoose.Schema(
+export const transactionSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     type: { type: String, enum: ['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'], required: true },
@@ -26,4 +26,6 @@ const transactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getTransactionModel = (conn) => conn.model('Transaction', transactionSchema);
 export default mongoose.model('Transaction', transactionSchema);
+

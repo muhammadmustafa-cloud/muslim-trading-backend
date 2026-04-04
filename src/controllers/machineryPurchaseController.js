@@ -1,9 +1,8 @@
-import MachineryPurchase from '../models/MachineryPurchase.js';
-import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
+  const { MachineryPurchase } = req.models;
   const { dateFrom, dateTo, machineryItemId, supplierId } = req.query;
   const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (machineryItemId) filter.machineryItemId = new mongoose.Types.ObjectId(machineryItemId);
@@ -19,6 +18,7 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { MachineryPurchase, Transaction } = req.models;
   const { date, machineryItemId, supplierId, accountId, amount, quantity, note } = req.body;
   if (!machineryItemId || !supplierId || !accountId || !amount) {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -62,6 +62,7 @@ export const create = async (req, res) => {
 };
 
 export const remove = async (req, res) => {
+  const { MachineryPurchase, Transaction } = req.models;
   const purchase = await MachineryPurchase.findById(req.params.id);
   if (!purchase) return res.status(404).json({ success: false, message: 'Entry not found' });
 

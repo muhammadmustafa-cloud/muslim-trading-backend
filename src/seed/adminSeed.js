@@ -1,7 +1,8 @@
-import User from '../models/User.js';
+
 import logger from '../utils/logger.js';
 
-export const seedAdminUser = async () => {
+export const seedAdminUser = async (models) => {
+  const { User } = models;
   try {
     const adminExists = await User.findOne({ role: 'superadmin' });
     if (!adminExists) {

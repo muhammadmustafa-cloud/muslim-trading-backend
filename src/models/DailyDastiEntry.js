@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const dailyDastiEntrySchema = new mongoose.Schema(
+export const dailyDastiEntrySchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     type: { type: String, enum: ['credit', 'debit'], required: true },
@@ -11,4 +11,6 @@ const dailyDastiEntrySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getDailyDastiEntryModel = (conn) => conn.model('DailyDastiEntry', dailyDastiEntrySchema);
 export default mongoose.model('DailyDastiEntry', dailyDastiEntrySchema);
+

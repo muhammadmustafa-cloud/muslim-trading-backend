@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const saleSchema = new mongoose.Schema(
+export const saleSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
@@ -45,4 +45,5 @@ const saleSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getSaleModel = (conn) => conn.model('Sale', saleSchema);
 export default mongoose.model('Sale', saleSchema);

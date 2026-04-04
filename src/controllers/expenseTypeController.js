@@ -1,9 +1,9 @@
-import ExpenseType from '../models/ExpenseType.js';
-import Transaction from '../models/Transaction.js';
+
 import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
   try {
+    const { ExpenseType } = req.models;
     const data = await ExpenseType.find().sort({ name: 1 }).lean();
     res.json({ success: true, data });
   } catch (e) {
@@ -13,6 +13,7 @@ export const list = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
+    const { ExpenseType } = req.models;
     const { name, description } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
     
@@ -28,6 +29,7 @@ export const create = async (req, res) => {
 
 export const remove = async (req, res) => {
   try {
+    const { ExpenseType, Transaction } = req.models;
     const { id } = req.params;
     const linkedTx = await Transaction.findOne({ expenseTypeId: id });
     if (linkedTx) {
@@ -42,6 +44,7 @@ export const remove = async (req, res) => {
 
 export const getLedger = async (req, res) => {
   try {
+    const { ExpenseType, Transaction } = req.models;
     const { id } = req.params;
     const { dateFrom, dateTo } = req.query;
     

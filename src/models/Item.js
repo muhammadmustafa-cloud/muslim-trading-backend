@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const itemSchema = new mongoose.Schema(
+export const itemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
@@ -9,4 +9,6 @@ const itemSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getItemModel = (conn) => conn.model('Item', itemSchema);
 export default mongoose.model('Item', itemSchema);
+

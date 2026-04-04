@@ -1,11 +1,9 @@
-import MazdoorExpense from '../models/MazdoorExpense.js';
-import MazdoorItem from '../models/MazdoorItem.js';
-import Transaction from '../models/Transaction.js';
-import { getAccountBalance } from './transactionController.js';
 import mongoose from 'mongoose';
+import { getAccountBalance } from './transactionController.js';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
+  const { MazdoorExpense } = req.models;
   const { dateFrom, dateTo, mazdoorId } = req.query;
   const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
@@ -20,6 +18,7 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { MazdoorExpense, MazdoorItem, Transaction, Account } = req.models;
   const { date, mazdoorId, mazdoorItemId, bags, accountId } = req.body;
   if (!mazdoorId || !mazdoorItemId || bags == null || !accountId) {
     return res.status(400).json({
@@ -42,10 +41,9 @@ export const create = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Total amount must be greater than 0 (check item rate and bags)' });
   }
 
-  const Account = (await import('../models/Account.js')).default;
   const account = await Account.findById(accountId).lean();
   if (!account) return res.status(400).json({ success: false, message: 'Account not found' });
-  const totalBalance = (account.openingBalance ?? 0) + (await getAccountBalance(accountId));
+  const totalBalance = (account.openingBalance ?? 0) + (await getAccountBalance(Transaction, accountId));
   if (totalBalance < totalAmount) {
     return res.status(400).json({
       success: false,

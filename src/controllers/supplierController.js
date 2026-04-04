@@ -1,12 +1,8 @@
-import Supplier from '../models/Supplier.js';
-import Customer from '../models/Customer.js';
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
-import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
+  const { Supplier } = req.models;
   const search = (req.query.search || '').trim();
   const filter = search ? { name: new RegExp(search, 'i') } : {};
   const suppliers = await Supplier.find(filter).populate('linkedCustomerId', 'name').sort({ name: 1 }).lean();
@@ -14,6 +10,7 @@ export const list = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { Supplier } = req.models;
   const supplier = await Supplier.findById(req.params.id).populate('linkedCustomerId', 'name').lean();
   if (!supplier) {
     return res.status(404).json({ success: false, message: 'Supplier not found' });
@@ -22,6 +19,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Supplier, Customer } = req.models;
   const { name, phone, address, notes, isAlsoCustomer, linkedCustomerId, createLinkedCustomer, openingBalance } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
@@ -57,6 +55,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { Supplier, Customer } = req.models;
   if (req.body.name !== undefined && (!req.body.name || !String(req.body.name).trim())) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
@@ -101,6 +100,7 @@ export const update = async (req, res) => {
 
 /** History: stock entries (unse khareeda) + sales (unko becha) if linked customer. Query: dateFrom, dateTo, type=sales|stock */
 export const getHistory = async (req, res) => {
+  const { Supplier, Sale, StockEntry, Transaction } = req.models;
   const supplier = await Supplier.findById(req.params.id).lean();
   if (!supplier) {
     return res.status(404).json({ success: false, message: 'Supplier not found' });
@@ -118,7 +118,6 @@ export const getHistory = async (req, res) => {
   const saleMatch = supplier.linkedCustomerId ? { customerId: supplier.linkedCustomerId } : null;
   if (saleMatch && hasDateFilter) saleMatch.date = dateFilter;
 
-  // Using global Transaction import
   const transMatch = { $or: [{ supplierId: req.params.id }] };
   if (hasDateFilter) transMatch.date = dateFilter;
 
@@ -242,6 +241,7 @@ export const getHistory = async (req, res) => {
 
 /** Get all suppliers with outstanding balances (Payables) */
 export const getPayables = async (req, res) => {
+  const { StockEntry } = req.models;
   const payables = await StockEntry.aggregate([
     { $match: { paymentStatus: { $ne: 'paid' }, amount: { $gt: 0 } } },
     {

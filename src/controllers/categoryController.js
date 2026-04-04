@@ -1,11 +1,13 @@
-import Category from '../models/Category.js';
+
 
 export const list = async (req, res) => {
+  const { Category } = req.models;
   const categories = await Category.find({}).sort({ order: 1, name: 1 }).lean();
   res.json({ success: true, data: categories });
 };
 
 export const getById = async (req, res) => {
+  const { Category } = req.models;
   const category = await Category.findById(req.params.id).lean();
   if (!category) {
     return res.status(404).json({ success: false, message: 'Category not found' });
@@ -14,6 +16,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Category } = req.models;
   const { name, order } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
@@ -30,6 +33,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { Category } = req.models;
   const { name, order } = req.body;
   const category = await Category.findById(req.params.id);
   if (!category) {

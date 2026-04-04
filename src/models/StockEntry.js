@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const stockEntrySchema = new mongoose.Schema(
+export const stockEntrySchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
@@ -46,4 +46,5 @@ const stockEntrySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getStockEntryModel = (conn) => conn.model('StockEntry', stockEntrySchema);
 export default mongoose.model('StockEntry', stockEntrySchema);

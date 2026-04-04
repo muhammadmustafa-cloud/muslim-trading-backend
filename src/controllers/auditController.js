@@ -1,20 +1,16 @@
 import mongoose from 'mongoose';
-import Customer from '../models/Customer.js';
-import Supplier from '../models/Supplier.js';
-import Mazdoor from '../models/Mazdoor.js';
-import Account from '../models/Account.js';
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
-import Transaction from '../models/Transaction.js';
-import MachineryPurchase from '../models/MachineryPurchase.js';
-import Item from '../models/Item.js';
-import RawMaterialHead from '../models/RawMaterialHead.js';
 import { getAccountBalance } from './transactionController.js';
 import { getCurrentStockData } from './stockController.js';
 import { toUTCStartOfDay, toUTCEndOfDay } from '../utils/dateUtils.js';
 
 export const getAuditSummary = async (req, res) => {
   try {
+    const { 
+      Account, Customer, Supplier, Mazdoor, 
+      MachineryPurchase, Transaction, Item, 
+      RawMaterialHead, Sale, StockEntry 
+    } = req.models;
+
     const { dateFrom, dateTo } = req.query;
     
     // Strict Date Boundary Fix (Forcing absolute start/end of UTC day)
@@ -43,7 +39,8 @@ export const getAuditSummary = async (req, res) => {
         { $match: { date: { $gte: fromDate, $lte: toDate } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
-      getCurrentStockData(),
+      getCurrentStockData(req.models),
+
       Transaction.aggregate([
         { $match: { date: { $gte: fromDate, $lte: toDate }, type: 'expense' } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
@@ -149,7 +146,8 @@ export const getAuditSummary = async (req, res) => {
       const periodBalance = tOut - tIn;
 
       // Current balance snapshot at the END of the period
-      const flow = await getAccountBalance(a._id, toDate);
+      const flow = await getAccountBalance(Transaction, a._id, toDate);
+
       const balanceSnapshot = (a.openingBalance ?? 0) + flow;
 
       accountDetails.push({
@@ -485,6 +483,10 @@ export const getAuditSummary = async (req, res) => {
  */
 export const getConsolidatedLedgers = async (req, res) => {
   try {
+    const { 
+      Transaction, Sale, StockEntry, Customer, Supplier, 
+      Mazdoor, ExpenseType, TaxType, RawMaterialHead, Account, Item 
+    } = req.models;
     const { dateFrom, dateTo } = req.query;
     const toDateStr = dateTo || new Date().toISOString().slice(0, 10);
     const fromDateStr = dateFrom || toDateStr;
@@ -514,12 +516,13 @@ export const getConsolidatedLedgers = async (req, res) => {
       Customer.find({}).lean(),
       Supplier.find({}).lean(),
       Mazdoor.find({}).lean(),
-      mongoose.model('ExpenseType').find({}).lean(),
-      mongoose.model('TaxType').find({}).lean(),
+      ExpenseType.find({}).lean(),
+      TaxType.find({}).lean(),
       RawMaterialHead.find({}).lean(),
       Account.find({}).lean(),
       Item.find({}).lean()
     ]);
+
 
     const activeCustomerIds = new Set([
       ...activeTrans.map(t => t.customerId?._id?.toString() || t.customerId?.toString()).filter(Boolean),

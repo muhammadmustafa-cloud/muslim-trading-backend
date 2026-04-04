@@ -1,12 +1,8 @@
-import Customer from '../models/Customer.js';
-import Supplier from '../models/Supplier.js';
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
-import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
+  const { Customer } = req.models;
   const search = (req.query.search || '').trim();
   const filter = search ? { name: new RegExp(search, 'i') } : {};
   const customers = await Customer.find(filter).populate('linkedSupplierId', 'name').sort({ name: 1 }).lean();
@@ -14,6 +10,7 @@ export const list = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { Customer } = req.models;
   const customer = await Customer.findById(req.params.id).populate('linkedSupplierId', 'name').lean();
   if (!customer) {
     return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -22,6 +19,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Customer, Supplier } = req.models;
   const { name, phone, address, notes, isAlsoSupplier, linkedSupplierId, createLinkedSupplier, openingBalance } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
@@ -57,6 +55,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { Customer, Supplier } = req.models;
   if (req.body.name !== undefined && (!req.body.name || !String(req.body.name).trim())) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
@@ -101,6 +100,7 @@ export const update = async (req, res) => {
 
 /** History: sales (unse becha) + stock entries (unse khareeda) if linked supplier. Query: dateFrom, dateTo (YYYY-MM-DD), type=sales|stock */
 export const getHistory = async (req, res) => {
+  const { Customer, Sale, StockEntry, Transaction } = req.models;
   const customer = await Customer.findById(req.params.id).lean();
   if (!customer) {
     return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -119,7 +119,6 @@ export const getHistory = async (req, res) => {
   if (stockMatch && hasDateFilter) stockMatch.date = dateFilter;
 
   // Transaction match: either linked to a sale of this customer, or directly to this customer
-  // Using global Transaction import
   const transMatch = { $or: [{ customerId: req.params.id }] };
   if (hasDateFilter) transMatch.date = dateFilter;
 
@@ -223,7 +222,7 @@ export const getHistory = async (req, res) => {
   ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // 5. Calculate Running Balance
-  let currentBalance = 0;
+   let currentBalance = 0;
   ledger.forEach(item => {
     currentBalance += (item.debit - item.credit);
     item.balance = currentBalance;
@@ -247,6 +246,7 @@ export const getHistory = async (req, res) => {
  * Returns customers with outstanding receivables (unpaid/partial sales), grouped by customer.
  */
 export const getReceivables = async (req, res) => {
+  const { Sale } = req.models;
   const sales = await Sale.find({ paymentStatus: { $in: ['pending', 'partial'] } })
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name' })

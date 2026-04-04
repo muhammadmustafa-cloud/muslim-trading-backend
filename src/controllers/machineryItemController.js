@@ -1,10 +1,9 @@
-import MachineryItem from '../models/MachineryItem.js';
-import MachineryPurchase from '../models/MachineryPurchase.js';
 import mongoose from 'mongoose';
 
 const populateConfig = null;
 
 export const list = async (req, res) => {
+  const { MachineryItem, MachineryPurchase } = req.models;
   const search = (req.query.search || '').trim();
   const filter = {};
   if (search) filter.name = new RegExp(search, 'i');
@@ -21,6 +20,7 @@ export const list = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { MachineryItem } = req.models;
   const item = await MachineryItem.findById(req.params.id).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Machinery Item not found' });
@@ -29,6 +29,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { MachineryItem } = req.models;
   const { name, quality, description } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
@@ -43,6 +44,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { MachineryItem } = req.models;
   const { name, quality, description } = req.body;
   const item = await MachineryItem.findByIdAndUpdate(
     req.params.id,
@@ -61,6 +63,7 @@ export const update = async (req, res) => {
 };
 
 export const deleteItem = async (req, res) => {
+  const { MachineryItem } = req.models;
   const item = await MachineryItem.findByIdAndDelete(req.params.id);
   if (!item) {
     return res.status(404).json({ success: false, message: 'Machinery Item not found' });
@@ -69,6 +72,7 @@ export const deleteItem = async (req, res) => {
 };
 
 export const getKhata = async (req, res) => {
+  const { MachineryItem, MachineryPurchase } = req.models;
   const item = await MachineryItem.findById(req.params.id).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Machinery Item not found' });
@@ -105,3 +109,4 @@ export const getKhata = async (req, res) => {
     },
   });
 };
+

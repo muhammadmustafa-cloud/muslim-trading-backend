@@ -1,16 +1,11 @@
-import Transaction from '../models/Transaction.js';
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
-import TaxType from '../models/TaxType.js';
-import ExpenseType from '../models/ExpenseType.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, toUTCEndOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 /**
  * Returns net flow for account: (sales + deposits in + transfers in) − (withdrawals + transfers out).
- * Full balance = openingBalance + getAccountBalance(accountId).
+ * Full balance = openingBalance + getAccountBalance(TransactionModel, accountId).
  */
-async function getAccountBalance(accountId, asOfDate) {
+async function getAccountBalance(Transaction, accountId, asOfDate) {
   if (!accountId) return 0;
   const id = new mongoose.Types.ObjectId(accountId);
   
@@ -51,12 +46,14 @@ function buildDateFilter(dateFrom, dateTo) {
 
 
 export const list = async (req, res) => {
+  const { Transaction, Sale, StockEntry } = req.models;
   const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified, rawMaterialHeadId } = req.query;
   const includeSalesAndStock = unified === 'true' || unified === '1';
 
   if (includeSalesAndStock) {
     const id = accountId ? new mongoose.Types.ObjectId(accountId) : null;
     const dateF = buildDateFilter(dateFrom, dateTo);
+
 
     const [transactions, sales, stockEntries] = await Promise.all([
       (() => {
@@ -171,7 +168,9 @@ export const list = async (req, res) => {
     return res.json({ success: true, data: rows });
   }
 
+
   const filter = {};
+
   if (accountId) {
     const id = new mongoose.Types.ObjectId(accountId);
     filter.$or = [
@@ -209,6 +208,7 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Transaction } = req.models;
   const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, tax, or expense' });
@@ -288,6 +288,7 @@ export const create = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { Transaction } = req.models;
   const transaction = await Transaction.findById(req.params.id)
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')

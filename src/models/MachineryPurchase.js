@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const machineryPurchaseSchema = new mongoose.Schema(
+export const machineryPurchaseSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     machineryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'MachineryItem', required: true },
@@ -14,4 +14,6 @@ const machineryPurchaseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getMachineryPurchaseModel = (conn) => conn.model('MachineryPurchase', machineryPurchaseSchema);
 export default mongoose.model('MachineryPurchase', machineryPurchaseSchema);
+

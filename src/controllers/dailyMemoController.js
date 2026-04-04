@@ -1,20 +1,10 @@
+import mongoose from "mongoose";
+import { toUTCStartOfDay, toUTCEndOfDay, buildUTCDateFilter } from "../utils/dateUtils.js";
+
 const formatDateOnly = (date) => {
   if (!date) return null;
   return new Date(date).toISOString().slice(0, 10);
 };
-
-import Sale from "../models/Sale.js";
-import StockEntry from "../models/StockEntry.js";
-import Transaction from "../models/Transaction.js";
-import MillExpense from "../models/MillExpense.js";
-import MazdoorExpense from "../models/MazdoorExpense.js";
-import Account from "../models/Account.js";
-import Customer from "../models/Customer.js";
-import Supplier from "../models/Supplier.js";
-import Mazdoor from "../models/Mazdoor.js";
-import DailyDastiEntry from "../models/DailyDastiEntry.js";
-import mongoose from "mongoose";
-import { toUTCStartOfDay, toUTCEndOfDay, buildUTCDateFilter } from "../utils/dateUtils.js";
 
 /**
  * Build date filter for a single day or range.
@@ -28,6 +18,7 @@ function dateFilter(dateFrom, dateTo) {
  * Universal Daily Ledger — strictly follows CASH FLOW using the Transaction model.
  */
 export const getDailyMemo = async (req, res) => {
+  const { Transaction, Account, Customer, Supplier, Mazdoor, DailyDastiEntry } = req.models;
   console.log("API HIT: getDailyMemo");
   const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
 

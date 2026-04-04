@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const millExpenseSchema = new mongoose.Schema(
+export const millExpenseSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     amount: { type: Number, required: true, min: 0 },
@@ -11,4 +11,6 @@ const millExpenseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getMillExpenseModel = (conn) => conn.model('MillExpense', millExpenseSchema);
 export default mongoose.model('MillExpense', millExpenseSchema);
+

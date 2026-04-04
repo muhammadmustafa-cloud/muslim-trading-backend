@@ -1,4 +1,4 @@
-import Account from '../models/Account.js';
+
 import logger from '../utils/logger.js';
 
 const DEFAULT_ACCOUNTS = [
@@ -11,7 +11,8 @@ const DEFAULT_ACCOUNTS = [
  * Ensures default accounts exist. Creates only those that don't exist (by name).
  * Idempotent: safe to run on every server start.
  */
-export async function seedDefaultAccounts() {
+export async function seedDefaultAccounts(models) {
+  const { Account } = models;
   try {
     for (const def of DEFAULT_ACCOUNTS) {
       const existing = await Account.findOne({

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const supplierSchema = new mongoose.Schema(
+export const supplierSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true, default: '' },
@@ -13,4 +13,6 @@ const supplierSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getSupplierModel = (conn) => conn.model('Supplier', supplierSchema);
 export default mongoose.model('Supplier', supplierSchema);
+

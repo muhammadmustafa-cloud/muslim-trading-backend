@@ -1,11 +1,8 @@
-import MillExpense from '../models/MillExpense.js';
-import Transaction from '../models/Transaction.js';
-import Account from '../models/Account.js';
-import { getAccountBalance } from './transactionController.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
-async function getOrCreateMillAccount() {
+async function getOrCreateMillAccount(models) {
+  const { Account } = models;
   let account = await Account.findOne({ isMillKhata: true }).lean();
   if (!account) {
     account = await Account.findOne({ name: /^Mill Khata$/i }).lean();
@@ -21,6 +18,7 @@ async function getOrCreateMillAccount() {
 }
 
 export const list = async (req, res) => {
+  const { MillExpense, Transaction } = req.models;
   const { dateFrom, dateTo, page = 1, limit = 10 } = req.query;
   const filter = buildUTCDateFilter(dateFrom, dateTo);
 
@@ -38,8 +36,8 @@ export const list = async (req, res) => {
   const allExpensesForTotal = await MillExpense.find(filter).lean();
   const total = allExpensesForTotal.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  const account = await getOrCreateMillAccount();
-  const flow = await getAccountBalance(account._id);
+  const account = await getOrCreateMillAccount(req.models);
+  const flow = await getAccountBalance(Transaction, account._id);
   const currentBalance = (account.openingBalance ?? 0) + flow;
 
   res.json({
@@ -57,13 +55,14 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { MillExpense, Transaction } = req.models;
   const { date, amount, category, note } = req.body;
   const amt = Number(amount);
   if (isNaN(amt) || amt <= 0) {
     return res.status(400).json({ success: false, message: 'Valid amount required' });
   }
-  const account = await getOrCreateMillAccount();
-  const balance = (account.openingBalance ?? 0) + (await getAccountBalance(account._id));
+  const account = await getOrCreateMillAccount(req.models);
+  const balance = (account.openingBalance ?? 0) + (await getAccountBalance(Transaction, account._id));
   if (balance < amt) {
     return res.status(400).json({ success: false, message: `Insufficient balance in Mill Khata. Available: ${balance}` });
   }

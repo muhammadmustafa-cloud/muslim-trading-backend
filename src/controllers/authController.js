@@ -1,5 +1,4 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'supersecretjwtkey_12345', {
@@ -11,6 +10,7 @@ const generateToken = (id) => {
 // @route   POST /api/auth/login
 // @access  Public
 export const login = async (req, res) => {
+  const { User } = req.models;
   const { username, password } = req.body;
 
   const user = await User.findOne({ username });
@@ -34,6 +34,7 @@ export const login = async (req, res) => {
 // @route   GET /api/auth/profile
 // @access  Private
 export const getProfile = async (req, res) => {
+  const { User } = req.models;
   const user = await User.findById(req.user._id);
 
   if (user) {

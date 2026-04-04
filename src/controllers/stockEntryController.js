@@ -1,10 +1,8 @@
-import StockEntry from '../models/StockEntry.js';
-import Item from '../models/Item.js';
-import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 export const list = async (req, res) => {
+  const { StockEntry } = req.models;
   const { dateFrom, dateTo, itemId, supplierId } = req.query;
   const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (itemId) filter.itemId = new mongoose.Types.ObjectId(itemId);
@@ -20,6 +18,7 @@ export const list = async (req, res) => {
 };
 
 export const listPending = async (req, res) => {
+  const { StockEntry } = req.models;
   const { supplierId } = req.query;
   const filter = { paymentStatus: { $ne: 'paid' } };
   if (supplierId) filter.supplierId = new mongoose.Types.ObjectId(supplierId);
@@ -33,6 +32,7 @@ export const listPending = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { StockEntry } = req.models;
   const entry = await StockEntry.findById(req.params.id)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
     .populate('supplierId', 'name')
@@ -45,6 +45,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { StockEntry, Transaction } = req.models;
   let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, totalBardanaAmount, totalMazdori, extras, dueDate, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
   
   if (typeof items === 'string') {
@@ -160,6 +161,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { StockEntry, Transaction } = req.models;
   const entry = await StockEntry.findById(req.params.id);
   if (!entry) {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
@@ -297,6 +299,7 @@ export const update = async (req, res) => {
 
 
 export const payEntry = async (req, res) => {
+  const { StockEntry, Transaction } = req.models;
   const { amount, accountId, date, note } = req.body;
   const entryId = req.params.id;
 

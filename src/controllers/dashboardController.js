@@ -1,9 +1,4 @@
-import Customer from '../models/Customer.js';
-import Supplier from '../models/Supplier.js';
-import Mazdoor from '../models/Mazdoor.js';
-import Account from '../models/Account.js';
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
+
 import { getAccountBalance } from './transactionController.js';
 import { getCurrentStockData } from './stockController.js';
 
@@ -12,6 +7,7 @@ import { getCurrentStockData } from './stockController.js';
  * Query: lowStockThreshold (number) — items with quantity < this are flagged as low stock.
  */
 export const getSummary = async (req, res) => {
+  const { Customer, Supplier, Mazdoor, Account, Sale, StockEntry, Transaction } = req.models;
   const lowStockThreshold = Number(req.query.lowStockThreshold);
   const useLowStock = !isNaN(lowStockThreshold);
 
@@ -30,7 +26,7 @@ export const getSummary = async (req, res) => {
       { $match: { date: { $gte: todayStart, $lte: todayEnd } } },
       { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' } } }, // full total for today
     ]),
-    getCurrentStockData(),
+    getCurrentStockData(req.models),
     StockEntry.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
     Sale.aggregate([{ $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
     StockEntry.aggregate([
@@ -41,7 +37,7 @@ export const getSummary = async (req, res) => {
 
   let totalBalance = 0;
   for (const a of accounts) {
-    const flow = await getAccountBalance(a._id);
+    const flow = await getAccountBalance(Transaction, a._id);
     totalBalance += (a.openingBalance ?? 0) + flow;
   }
 

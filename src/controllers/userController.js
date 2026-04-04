@@ -1,9 +1,10 @@
-import User from '../models/User.js';
+
 
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
 export const getUsers = async (req, res) => {
+  const { User } = req.models;
   const users = await User.find({}).select('-password');
   res.json({ success: true, data: users });
 };
@@ -12,6 +13,7 @@ export const getUsers = async (req, res) => {
 // @route   POST /api/users
 // @access  Private/Admin
 export const createUser = async (req, res) => {
+  const { User } = req.models;
   const { name, username, password, role } = req.body;
 
   const userExists = await User.findOne({ username });
@@ -46,6 +48,7 @@ export const createUser = async (req, res) => {
 // @route   PUT /api/users/:id
 // @access  Private/Admin
 export const updateUser = async (req, res) => {
+  const { User } = req.models;
   const user = await User.findById(req.params.id);
 
   if (user) {
@@ -77,6 +80,7 @@ export const updateUser = async (req, res) => {
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
 export const deleteUser = async (req, res) => {
+  const { User } = req.models;
   const user = await User.findById(req.params.id);
 
   if (user) {

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const mazdoorSchema = new mongoose.Schema(
+export const mazdoorSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true, default: '' },
@@ -11,4 +11,6 @@ const mazdoorSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getMazdoorModel = (conn) => conn.model('Mazdoor', mazdoorSchema);
 export default mongoose.model('Mazdoor', mazdoorSchema);
+

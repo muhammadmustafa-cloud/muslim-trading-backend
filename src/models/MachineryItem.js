@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const machineryItemSchema = new mongoose.Schema(
+export const machineryItemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     quality: { type: String, trim: true, default: '' },
@@ -9,4 +9,6 @@ const machineryItemSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getMachineryItemModel = (conn) => conn.model('MachineryItem', machineryItemSchema);
 export default mongoose.model('MachineryItem', machineryItemSchema);
+

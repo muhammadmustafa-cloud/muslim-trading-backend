@@ -1,12 +1,10 @@
-import StockEntry from '../models/StockEntry.js';
-import Sale from '../models/Sale.js';
-import Item from '../models/Item.js';
 import mongoose from 'mongoose';
 
 /**
  * Returns current stock per item: sum(stock entry quantity) − sum(sales quantity).
  */
-export async function getCurrentStockData() {
+export async function getCurrentStockData(models) {
+  const { StockEntry, Sale, Item } = models;
   const [purchases, sales] = await Promise.all([
     StockEntry.aggregate([
       { $unwind: "$items" },
@@ -73,6 +71,6 @@ export async function getCurrentStockData() {
  * Current stock per item — API handler.
  */
 export const currentStock = async (req, res) => {
-  const data = await getCurrentStockData();
+  const data = await getCurrentStockData(req.models);
   res.json({ success: true, data });
 };

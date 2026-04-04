@@ -1,6 +1,3 @@
-import Item from '../models/Item.js';
-import StockEntry from '../models/StockEntry.js';
-import Sale from '../models/Sale.js';
 import mongoose from 'mongoose';
 import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
@@ -8,6 +5,7 @@ const itemListSelect = 'name categoryId quality';
 const itemListPopulate = { path: 'categoryId', select: 'name' };
 
 export const list = async (req, res) => {
+  const { Item } = req.models;
   const search = (req.query.search || '').trim();
   const categoryId = (req.query.categoryId || '').trim();
   const filter = {};
@@ -18,6 +16,7 @@ export const list = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { Item } = req.models;
   const item = await Item.findById(req.params.id).populate(itemListPopulate).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
@@ -26,6 +25,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Item } = req.models;
   const { name, categoryId, quality } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
@@ -40,6 +40,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { Item } = req.models;
   const { name, categoryId, quality } = req.body;
   const item = await Item.findById(req.params.id);
   if (!item) {
@@ -63,6 +64,7 @@ export const update = async (req, res) => {
  * Query: dateFrom, dateTo (YYYY-MM-DD).
  */
 export const getKhata = async (req, res) => {
+  const { Item, StockEntry, Sale } = req.models;
   const item = await Item.findById(req.params.id).populate(itemListPopulate).lean();
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
@@ -123,6 +125,7 @@ export const getKhata = async (req, res) => {
       { $limit: 1000 }
     ])
   ]);
+
 
   // Standardize the shape for the frontend & Handle Weight Fallbacks
   const purchases = purchasesRaw.map(p => {

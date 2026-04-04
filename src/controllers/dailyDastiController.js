@@ -1,10 +1,11 @@
-import DailyDastiEntry from '../models/DailyDastiEntry.js';
+
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 /**
  * GET ALL DASTI ENTRIES
  */
 export const getDastiEntries = async (req, res) => {
+  const { DailyDastiEntry } = req.models;
   const { dateFrom, dateTo } = req.query;
 
   try {
@@ -21,6 +22,7 @@ export const getDastiEntries = async (req, res) => {
  * CREATE DASTI ENTRY
  */
 export const createDastiEntry = async (req, res) => {
+  const { DailyDastiEntry } = req.models;
   const { name, type, amount, date, note } = req.body;
 
   try {
@@ -48,6 +50,7 @@ export const createDastiEntry = async (req, res) => {
  * DELETE DASTI ENTRY
  */
 export const deleteDastiEntry = async (req, res) => {
+  const { DailyDastiEntry } = req.models;
   const { id } = req.params;
 
   try {

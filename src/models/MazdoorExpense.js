@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const mazdoorExpenseSchema = new mongoose.Schema(
+export const mazdoorExpenseSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true, default: () => new Date() },
     mazdoorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Mazdoor', required: true },
@@ -13,4 +13,6 @@ const mazdoorExpenseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getMazdoorExpenseModel = (conn) => conn.model('MazdoorExpense', mazdoorExpenseSchema);
 export default mongoose.model('MazdoorExpense', mazdoorExpenseSchema);
+

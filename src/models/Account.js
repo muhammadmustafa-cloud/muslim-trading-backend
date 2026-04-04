@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const accountSchema = new mongoose.Schema(
+export const accountSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     type: { type: String, enum: ['Bank', 'Cash'], default: 'Cash' },
@@ -13,4 +13,6 @@ const accountSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getAccountModel = (conn) => conn.model('Account', accountSchema);
 export default mongoose.model('Account', accountSchema);
+

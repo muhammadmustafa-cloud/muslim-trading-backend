@@ -1,11 +1,8 @@
-import Sale from '../models/Sale.js';
-import StockEntry from '../models/StockEntry.js';
-import Item from '../models/Item.js';
-import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
-async function getAvailableQuantity(itemId, excludeSaleId = null) {
+async function getAvailableQuantity(models, itemId, excludeSaleId = null) {
+  const { StockEntry, Sale } = models;
   const itemObjId = new mongoose.Types.ObjectId(itemId);
   
   // Sum In from StockEntry.items
@@ -40,11 +37,12 @@ export const getAvailable = async (req, res) => {
   if (!itemId) {
     return res.status(400).json({ success: false, message: 'itemId required' });
   }
-  const { availableQty, availableKattay } = await getAvailableQuantity(itemId, excludeSaleId || null);
+  const { availableQty, availableKattay } = await getAvailableQuantity(req.models, itemId, excludeSaleId || null);
   res.json({ success: true, data: { available: availableQty, availableWeight: availableQty, availableKattay } });
 };
 
 export const list = async (req, res) => {
+  const { Sale } = req.models;
   const { dateFrom, dateTo, customerId, itemId } = req.query;
   const filter = buildUTCDateFilter(dateFrom, dateTo);
   if (customerId) filter.customerId = new mongoose.Types.ObjectId(customerId);
@@ -68,6 +66,7 @@ export const list = async (req, res) => {
 };
 
 export const getById = async (req, res) => {
+  const { Sale } = req.models;
   const sale = await Sale.findById(req.params.id)
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
@@ -86,6 +85,7 @@ export const getById = async (req, res) => {
 };
 
 export const create = async (req, res) => {
+  const { Sale, Transaction } = req.models;
   let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
   
   // Parse items if they come as a JSON string (typical for FormData)
@@ -228,6 +228,7 @@ export const create = async (req, res) => {
 };
 
 export const update = async (req, res) => {
+  const { Sale, Transaction } = req.models;
   const sale = await Sale.findById(req.params.id);
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });
@@ -395,6 +396,7 @@ export const update = async (req, res) => {
  * Creates a linked Transaction and updates amountReceived/paymentStatus.
  */
 export const collectPayment = async (req, res) => {
+  const { Sale, Transaction } = req.models;
   const sale = await Sale.findById(req.params.id);
   if (!sale) {
     return res.status(404).json({ success: false, message: 'Sale not found' });

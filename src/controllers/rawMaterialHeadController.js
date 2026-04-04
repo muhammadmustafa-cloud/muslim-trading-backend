@@ -1,7 +1,8 @@
-import RawMaterialHead from '../models/RawMaterialHead.js';
+
 
 export const list = async (req, res) => {
   try {
+    const { RawMaterialHead } = req.models;
     let heads = await RawMaterialHead.find().sort({ name: 1 });
     
     // Auto-populate default items if none exist
@@ -23,6 +24,7 @@ export const list = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
+    const { RawMaterialHead } = req.models;
     const { name } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Name required' });
     
@@ -35,6 +37,7 @@ export const create = async (req, res) => {
 
 export const update = async (req, res) => {
   try {
+    const { RawMaterialHead } = req.models;
     const head = await RawMaterialHead.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json({ success: true, data: head });
   } catch (error) {
@@ -44,6 +47,7 @@ export const update = async (req, res) => {
 
 export const remove = async (req, res) => {
   try {
+    const { RawMaterialHead } = req.models;
     await RawMaterialHead.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Deleted' });
   } catch (error) {

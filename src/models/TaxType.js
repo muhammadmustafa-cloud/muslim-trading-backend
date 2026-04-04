@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const taxTypeSchema = new mongoose.Schema(
+export const taxTypeSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, unique: true, trim: true },
     description: { type: String, trim: true, default: '' },
@@ -8,4 +8,6 @@ const taxTypeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+export const getTaxTypeModel = (conn) => conn.model('TaxType', taxTypeSchema);
 export default mongoose.model('TaxType', taxTypeSchema);
+
