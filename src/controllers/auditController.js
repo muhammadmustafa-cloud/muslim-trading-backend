@@ -60,94 +60,126 @@ export const getAuditSummary = async (req, res) => {
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
     // Calculate Mill Opening Balance (Pichli Wasooli) - Balance BEFORE the start of the selected range.
-    const opBalBoundary = dateFrom ? toUTCStartOfDay(dateFrom) : new Date(0);
+    const opBalBoundary = fromDate;
 
     const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
     const millAccIds = allMillAccs.map(a => a._id);
     const baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
 
+    // ----------------------------------------------------
+    // PERFECT UNIVERSAL OPENING BALANCE SYNCHRONIZATION
+    // ----------------------------------------------------
     const prevTransactions = await Transaction.aggregate([
       { $match: { date: { $lt: opBalBoundary }, type: { $ne: 'accrual' } } },
       {
         $group: {
           _id: null,
-          totalIn: { 
-            $sum: { 
+          totalIn: {
+            $sum: {
               $cond: [
-                { $and: [
-                  { $in: ['$toAccountId', millAccIds] }, // Entering Mill
-                  { $not: { $in: ['$fromAccountId', millAccIds] } } // Not from another Mill
-                ]}, 
-                '$amount', 
+                {
+                  $or: [
+                    { $in: ['$toAccountId', millAccIds] }, // Standard Inflow
+                    { 
+                      // HACK: Mill to Bank Transfer counts as Inflow (keeps balance same as Universal Ledger)
+                      $and: [
+                        { $eq: ['$type', 'transfer'] },
+                        { $in: ['$fromAccountId', millAccIds] },
+                        { $not: { $in: ['$toAccountId', millAccIds] } }
+                      ]
+                    }
+                  ]
+                },
+                '$amount',
                 0
-              ] 
-            } 
+              ]
+            }
           },
-          totalOut: { 
-            $sum: { 
+          totalOut: {
+            $sum: {
               $cond: [
-                { $and: [
-                  { $in: ['$fromAccountId', millAccIds] }, // Leaving Mill
-                  { $not: { $in: ['$toAccountId', millAccIds] } } // Not to another Mill
-                ]}, 
-                '$amount', 
+                { $in: ['$fromAccountId', millAccIds] }, // Standard Outflow
+                '$amount',
                 0
-              ] 
-            } 
-          },
+              ]
+            }
+          }
         }
       }
     ]);
     const openingBalance = baseOpeningBalance + (prevTransactions.length > 0 ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) : 0);
 
-    // 1. Account Details (Global standing + Period Inflow/Outflow)
+    // 1. Bank & Cash Account Details (Periodic Activity Sync)
+    // We aggregate ALL accounts in one pass for precision and dashboard alignment
+    const allAccountMovements = await Transaction.aggregate([
+      { $match: { ...activityMatch, $or: [
+          { fromAccountId: { $in: accounts.map(a => a._id) } },
+          { toAccountId:   { $in: accounts.map(a => a._id) } }
+      ]}},
+      { $project: {
+          amount: 1,
+          fromAccountId: 1,
+          toAccountId: 1,
+          // Extract matching IDs as strings for reliable comparison
+          fromIdStr: { $toString: '$fromAccountId' },
+          toIdStr:   { $toString: '$toAccountId' }
+      }},
+      { $facet: {
+          outgoing: [
+            { $group: { _id: '$fromAccountId', total: { $sum: '$amount' } } }
+          ],
+          incoming: [
+            // SAHI DASHBOARD LOGIC: Priority to Outflow. 
+            // If it's a self-transfer (from==to), only count it as outgoing.
+            { $match: { $expr: { $ne: ['$fromAccountId', '$toAccountId'] } } },
+            { $group: { _id: '$toAccountId', total: { $sum: '$amount' } } }
+          ]
+      }}
+    ]);
+
+    const outMap = new Map(allAccountMovements[0].outgoing.filter(x => x._id).map(x => [x._id.toString(), x.total]));
+    const inMap  = new Map(allAccountMovements[0].incoming.filter(x => x._id).map(x => [x._id.toString(), x.total]));
+
     const accountDetails = [];
     let totalCash = 0;
+
     for (const a of accounts) {
-      // Always get In/Out for the selected period
-      const periodTrans = await Transaction.aggregate([
-        { $match: { ...activityMatch, $or: [{ fromAccountId: a._id }, { toAccountId: a._id }] } },
-        { $group: {
-          _id: null,
-          totalIn:  { $sum: { $cond: [{ $eq: ['$toAccountId',   a._id] }, '$amount', 0] } },
-          totalOut: { $sum: { $cond: [{ $eq: ['$fromAccountId', a._id] }, '$amount', 0] } }
-        }}
-      ]);
+      const tOut = outMap.get(a._id.toString()) || 0;
+      const tIn  = inMap.get(a._id.toString()) || 0;
+      const periodBalance = tOut - tIn;
 
-    const tIn = periodTrans[0]?.totalIn || 0;
-const tOut = periodTrans[0]?.totalOut || 0;
+      // Current balance snapshot at the END of the period
+      const flow = await getAccountBalance(a._id, toDate);
+      const balanceSnapshot = (a.openingBalance ?? 0) + flow;
 
-// All-time balance (UI ke liye)
-const flow = await getAccountBalance(a._id, toDate);
-const balance = (a.openingBalance ?? 0) + flow;
+      accountDetails.push({
+        _id: a._id,
+        name: a.name,
+        type: a.type,
+        balance: balanceSnapshot,
+        periodBalance,
+        tIn,
+        tOut,
+        isDailyKhata: !!a.isDailyKhata,
+        isMillKhata: !!a.isMillKhata
+      });
 
-// Period-only net movement (PDF ke liye)
-const periodBalance = tIn - tOut;
-
-totalCash += balance;
-accountDetails.push({ 
-  _id: a._id,
-  name: a.name, 
-  balance,           // UI mein dikhta rahega
-  periodBalance,     // PDF mein yeh use hoga
-  totalIn: tIn, 
-  totalOut: tOut,
-  isDailyKhata: !!a.isDailyKhata,
-  isMillKhata: !!a.isMillKhata
-});
+      if (!a.isDailyKhata && !a.isMillKhata) {
+         totalCash += balanceSnapshot;
+      }
     }
 
     // 2. Detailed Customer Balances (Point-in-Time Snapshot)
     const snapshotMatch = { date: { $lte: toDate } };
     
+    // SAHI: Count ALL Deposits/Transfers as money in, ALL Withdraws as money out (Ledger match)
     const customerTransactions = await Transaction.aggregate([
       { $match: { ...snapshotMatch, customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
-        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$supplierId', null] }] }] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
       } }
-
     ]);
     const customerSales = await Sale.aggregate([
        { $match: snapshotMatch },
@@ -159,8 +191,8 @@ accountDetails.push({
       { $match: { ...periodMatch, customerId: { $ne: null } } },
       { $group: { 
         _id: '$customerId', 
-        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$supplierId', null] }] }] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $eq: ['$type', 'withdraw'] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
       } }
     ]);
     const periodCustomerSales = await Sale.aggregate([
@@ -180,8 +212,8 @@ accountDetails.push({
         name: c.name, 
         balance, 
         phone: c.phone || '',
-        periodIn: pTrans.totalIn, // Movement In
-        periodOut: pSales.total + pTrans.totalOut // Movement Out (Sales added here)
+        periodIn: pTrans.totalIn, // RECEIVED in period
+        periodOut: pSales.total + pTrans.totalOut // BILLED in period
       };
     }).sort((a, b) => b.balance - a.balance);
 
@@ -193,10 +225,9 @@ accountDetails.push({
       { $match: { ...snapshotMatch, supplierId: { $ne: null } } },
       { $group: { 
         _id: '$supplierId', 
-        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }, { $eq: ['$type', 'transfer'] }] }, '$amount', 0] } },
       } }
-
     ]);
     const supplierPurchases = await StockEntry.aggregate([
       { $match: snapshotMatch },
@@ -207,8 +238,8 @@ accountDetails.push({
       { $match: { ...periodMatch, supplierId: { $ne: null } } },
       { $group: { 
         _id: '$supplierId', 
-        totalIn: { $sum: { $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0] } },
-        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
+        totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+        totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }, { $eq: ['$type', 'transfer'] }] }, '$amount', 0] } },
       } }
     ]);
     const periodSupplierPurchases = await StockEntry.aggregate([
@@ -228,8 +259,8 @@ accountDetails.push({
         name: s.name, 
         balance, 
         phone: s.phone || '',
-        periodIn: pPurch.total + pTrans.totalIn, // Movement In (Purchase added here)
-        periodOut: pTrans.totalOut // Movement Out
+        periodIn: pPurch.total + pTrans.totalIn, // PAYABLE (Inward)
+        periodOut: pTrans.totalOut // PAID (Outward)
       };
     }).sort((a, b) => a.balance - b.balance);
 
@@ -240,18 +271,19 @@ accountDetails.push({
       { $match: { ...snapshotMatch, mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
-        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary']] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
-        earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
+        // PAIDS: Withdrawals, salary transactions, or transfers (money going OUT to mazdoor)
+        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary', 'transfer']] }] }, '$amount', 0] } },
+        // EARNED: Any transaction where they provided value (accruals or mazdoor_expense)
+        earned: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['deposit', 'income']] }, { $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }] }, '$amount', 0] } }
       }}
-
     ]);
 
     const periodMazdoorTrans = await Transaction.aggregate([
       { $match: { ...periodMatch, mazdoorId: { $ne: null } } },
       { $group: {
         _id: '$mazdoorId',
-        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary']] }, { $and: [{ $eq: ['$type', 'transfer'] }, { $ne: ['$customerId', null] }] }] }, '$amount', 0] } },
-        earned: { $sum: { $cond: [{ $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }, '$amount', 0] } }
+        paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary', 'transfer']] }] }, '$amount', 0] } },
+        earned: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['deposit', 'income']] }, { $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }] }, '$amount', 0] } }
       }}
     ]);
 
@@ -270,6 +302,7 @@ accountDetails.push({
         periodPaid: pStat.paid
       };
     }).sort((a, b) => b.balance - a.balance);
+
 
     const totalMazdoorPayables = detailedMazdoors.filter(m => m.balance > 0).reduce((sum, m) => sum + m.balance, 0);
 
@@ -372,10 +405,55 @@ accountDetails.push({
                              (filteredSuppliers.filter(s => s.balance < 0).reduce((sum, s) => sum + Math.abs(s.balance), 0)) +
                              (filteredMazdoors.filter(m => m.balance > 0).reduce((sum, m) => sum + m.balance, 0));
 
+    // ----------------------------------------------------
+    // PERFECT UNIVERSAL BAQAYA SYNCHRONIZATION
+    // ----------------------------------------------------
+    // We replicate the exact historical tracking logic of dailyMemoController
+    // preventing mathematical deviations like the Mill->Bank proxy inflations.
+    const allTimeAgg = await Transaction.aggregate([
+      { $match: { date: { $lte: toDate }, type: { $ne: 'accrual' } } },
+      {
+        $group: {
+          _id: null,
+          totalAllTimeIn: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $in: ['$toAccountId', millAccIds] },
+                    { 
+                      $and: [
+                        { $eq: ['$type', 'transfer'] },
+                        { $in: ['$fromAccountId', millAccIds] },
+                        { $not: { $in: ['$toAccountId', millAccIds] } }
+                      ]
+                    }
+                  ]
+                },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalAllTimeOut: {
+            $sum: {
+              $cond: [
+                { $in: ['$fromAccountId', millAccIds] },
+                '$amount',
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    const universalBaqaya = baseOpeningBalance + (allTimeAgg.length > 0 ? (allTimeAgg[0].totalAllTimeIn - allTimeAgg[0].totalAllTimeOut) : 0);
+
     res.json({
       success: true,
       data: {
         openingBalance,
+        universalBaqaya,
         totalCash,
         totalReceivables: scenarioReceivables,
         totalPayables: scenarioPayables,

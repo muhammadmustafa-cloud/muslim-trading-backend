@@ -25,17 +25,17 @@ async function getAccountBalance(accountId, asOfDate) {
     }
   }
   
-  const dateMatch = boundaryDate ? { date: { $lte: boundaryDate } } : {};
+  const dateMatch = boundaryDate ? { date: { $lte: boundaryDate }, type: { $ne: 'accrual' } } : { type: { $ne: 'accrual' } };
 
-  const [depositIn, transferOutAsCredit, withdrawOut, transferInAsDebit] = await Promise.all([
-    Transaction.aggregate([{ $match: { ...dateMatch, type: 'deposit', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { ...dateMatch, type: 'transfer', fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]), // Source = Credit
-    Transaction.aggregate([{ $match: { ...dateMatch, type: { $in: ['withdraw', 'salary', 'tax', 'expense'] }, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Transaction.aggregate([{ $match: { ...dateMatch, type: 'transfer', toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]), // Destination = Debit
+  const [inflows, outflows] = await Promise.all([
+    Transaction.aggregate([{ $match: { ...dateMatch, toAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    Transaction.aggregate([{ $match: { ...dateMatch, fromAccountId: id } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
   ]);
-  const credits = (depositIn[0]?.total ?? 0) + (transferOutAsCredit[0]?.total ?? 0);
-  const debits = (withdrawOut[0]?.total ?? 0) + (transferInAsDebit[0]?.total ?? 0);
-  return credits - debits;
+  
+  const totalIn = inflows[0]?.total ?? 0;
+  const totalOut = outflows[0]?.total ?? 0;
+  
+  return totalIn - totalOut;
 }
 
 /**
