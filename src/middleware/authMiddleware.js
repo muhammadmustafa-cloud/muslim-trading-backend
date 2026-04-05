@@ -10,14 +10,22 @@ export const protect = async (req, res, next) => {
       
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey_12345');
       
-      req.user = await User.findById(decoded.id).select('-password');
+      // Use req.models.User if available (multi-tenant mode), otherwise fallback to imported User
+      const UserModel = req.models ? req.models.User : User;
+
+      if (!UserModel) {
+        return res.status(500).json({ success: false, message: 'User model not initialized' });
+      }
+
+      req.user = await UserModel.findById(decoded.id).select('-password');
+      
       if (!req.user) {
         return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
       }
 
       next();
     } catch (error) {
-      console.error(error);
+      console.error('Auth Error:', error);
       return res.status(401).json({ success: false, message: 'Not authorized, token failed' });
     }
   }
