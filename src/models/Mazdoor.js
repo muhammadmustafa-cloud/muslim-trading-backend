@@ -7,6 +7,7 @@ export const mazdoorSchema = new mongoose.Schema(
     role: { type: String, trim: true, default: '' },
     notes: { type: String, trim: true, default: '' },
     monthlySalary: { type: Number, default: 0, min: 0 },
+    openingBalance: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

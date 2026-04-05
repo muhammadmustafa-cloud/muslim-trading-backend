@@ -289,7 +289,7 @@ export const getAuditSummary = async (req, res) => {
       const snap = mazdoorTransactions.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
       const pStat = periodMazdoorTrans.find(s => s._id?.toString() === m._id.toString()) || { paid: 0, earned: 0 };
       
-      const balance = snap.earned - snap.paid;
+      const balance = (m.openingBalance || 0) + snap.earned - snap.paid;
       return { 
         _id: m._id, 
         name: m.name, 

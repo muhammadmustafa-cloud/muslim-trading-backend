@@ -48,13 +48,14 @@ export async function getCurrentStockData(models) {
 
   const result = items.map((item) => {
     const stock = stockMap.get(item._id.toString()) || { quantity: 0, kattay: 0 };
+    // Starting point is now the "Opening Stock" entered by the user
     return {
       itemId: item._id,
       itemName: item.name,
       category: item.categoryId?.name || "",
       quality: item.quality || "",
-      quantity: Math.max(0, stock.quantity),
-      kattay: Math.max(0, stock.kattay),
+      quantity: Math.max(0, (item.openingWeight || 0) + stock.quantity),
+      kattay: Math.max(0, (item.openingBags || 0) + stock.kattay),
     };
   });
 
