@@ -12,6 +12,6 @@ router.get('/receivables', asyncHandler(customerController.getReceivables));
 router.get('/:id/history', asyncHandler(customerController.getHistory));
 router.get('/:id', asyncHandler(customerController.getById));
 router.post('/', asyncHandler(customerController.create));
-router.put('/:id', superAdminOnly, asyncHandler(customerController.update));
+router.put('/:id', asyncHandler(customerController.update));
 
 export default router;
