@@ -305,4 +305,90 @@ export const getById = async (req, res) => {
   res.json({ success: true, data: transaction });
 };
 
+export const update = async (req, res) => {
+  const { Transaction } = req.models;
+  const { id } = req.params;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
+
+  const transaction = await Transaction.findById(id);
+  if (!transaction) {
+    return res.status(404).json({ success: false, message: 'Transaction not found' });
+  }
+
+  // Prevent editing sales/purchases directly from here if they are system linked
+  if (transaction.saleId || transaction.stockEntryId) {
+    return res.status(400).json({ success: false, message: 'Cannot edit system-generated transactions (Sales/Purchases) from here. Please use the respective modules.' });
+  }
+
+  const amt = Number(amount);
+  if (isNaN(amt) || amt <= 0) {
+    return res.status(400).json({ success: false, message: 'amount must be a positive number' });
+  }
+
+  // Basic validation (same as create)
+  if (type === 'deposit' && !toAccountId) return res.status(400).json({ success: false, message: 'toAccountId required for deposit' });
+  if ((type === 'withdraw' || type === 'salary' || type === 'tax' || type === 'expense') && !fromAccountId) {
+    return res.status(400).json({ success: false, message: `fromAccountId required for ${type}` });
+  }
+  if (type === 'tax' && !taxTypeId) return res.status(400).json({ success: false, message: 'taxTypeId required for tax payment' });
+  if (type === 'expense' && !expenseTypeId) return res.status(400).json({ success: false, message: 'expenseTypeId required for expense' });
+  if (type === 'salary' && !mazdoorId) return res.status(400).json({ success: false, message: 'mazdoorId required for salary' });
+
+  // Update fields
+  transaction.date = date ? toUTCStartOfDay(date) : transaction.date;
+  transaction.type = type || transaction.type;
+  transaction.fromAccountId = fromAccountId || null;
+  transaction.toAccountId = toAccountId || null;
+  transaction.amount = amt;
+  transaction.category = (category || '').trim();
+  transaction.note = (note || '').trim();
+  transaction.supplierId = supplierId || null;
+  transaction.customerId = customerId || null;
+  transaction.mazdoorId = mazdoorId || null;
+  transaction.machineryPurchaseId = machineryPurchaseId || null;
+  transaction.taxTypeId = taxTypeId || null;
+  transaction.expenseTypeId = expenseTypeId || null;
+  transaction.rawMaterialHeadId = rawMaterialHeadId || null;
+  transaction.paymentMethod = paymentMethod || 'cash';
+  transaction.chequeNumber = (chequeNumber || '').trim();
+  transaction.chequeDate = chequeDate ? new Date(chequeDate) : null;
+
+  if (req.file) {
+    transaction.image = req.file.path;
+  }
+
+  await transaction.save();
+
+  const populated = await Transaction.findById(transaction._id)
+    .populate('fromAccountId', 'name')
+    .populate('toAccountId', 'name')
+    .populate('supplierId', 'name')
+    .populate('customerId', 'name')
+    .populate('mazdoorId', 'name')
+    .populate('taxTypeId', 'name')
+    .populate('expenseTypeId', 'name')
+    .populate('rawMaterialHeadId', 'name')
+    .lean();
+
+  res.json({ success: true, data: populated });
+};
+
+export const remove = async (req, res) => {
+  const { Transaction } = req.models;
+  const { id } = req.params;
+
+  const transaction = await Transaction.findById(id);
+  if (!transaction) {
+    return res.status(404).json({ success: false, message: 'Transaction not found' });
+  }
+
+  if (transaction.saleId || transaction.stockEntryId) {
+    return res.status(400).json({ success: false, message: 'Cannot delete system-generated transactions (Sales/Purchases). Please delete from the respective module.' });
+  }
+
+  await Transaction.findByIdAndDelete(id);
+  res.json({ success: true, message: 'Transaction deleted' });
+};
+
 export { getAccountBalance };
+
