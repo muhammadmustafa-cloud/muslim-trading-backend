@@ -347,65 +347,9 @@ transactions.forEach(t => {
     }
   });
 
-  // Calculate clean summary excluding internal loop-backs
-  const todayAgg = await Transaction.aggregate([
-    { $match: currMatch },
-    {
-      $group: {
-        _id: null,
-        totalIn: {
-          $sum: {
-            $cond: [
-              {
-                $or: [
-                  // Case A: Specific account filter
-                  { $and: [!!accountId, { $eq: ["$toAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  // Case B: Full Mill — money entered any mill account
-                  { $and: [!accountId, { $in: ["$toAccountId", millAccObjectIdIds] }] },
-                  // Case C: Party ledgers
-                  { $and: [!!customerId, { $eq: ["$type", "deposit"] }] },
-                  { $and: [!!supplierId, { $eq: ["$type", "deposit"] }] },
-                  /**
-                   * Case D: Mill → External (Bank) Transfer → Count in Credit (totalIn)
-                   * Mirrors the same Case D logic in prevTransactions above.
-                   */
-                  {
-                    $and: [
-                      !accountId && !customerId && !supplierId && !mazdoorId,
-                      { $eq: ["$type", "transfer"] },
-                      { $in: ["$fromAccountId", millAccObjectIdIds] },
-                      { $not: { $in: ["$toAccountId", millAccObjectIdIds] } }
-                    ]
-                  },
-                ],
-              },
-              "$amount",
-              0,
-            ],
-          },
-        },
-        totalOut: {
-          $sum: {
-            $cond: [
-              {
-                $or: [
-                  { $and: [!!accountId, { $eq: ["$fromAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  { $and: [!accountId, { $in: ["$fromAccountId", millAccObjectIdIds] }] },
-                  { $and: [!!customerId, { $eq: ["$type", "withdraw"] }] },
-                  { $and: [!!supplierId, { $eq: ["$type", "withdraw"] }] },
-                ],
-              },
-              "$amount",
-              0,
-            ],
-          },
-        },
-      },
-    },
-  ]);
-
-  const todayIn = todayAgg[0]?.totalIn || 0;
-  const todayOut = todayAgg[0]?.totalOut || 0;
+  // Calculate summary based on the actual rows displayed (Gross Turnover Logic)
+  const todayIn = rows.reduce((sum, r) => sum + (r.amountType === "in" ? r.amount : 0), 0);
+  const todayOut = rows.reduce((sum, r) => sum + (r.amountType === "out" ? r.amount : 0), 0);
   // 3. Fetch Dasti Entries for the same period
   const dastiEntries = await DailyDastiEntry.find({
     date: { $gte: fromDate, $lte: toDate },
