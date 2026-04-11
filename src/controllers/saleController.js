@@ -151,29 +151,15 @@ export const create = async (req, res) => {
     };
   });
 
-  // 2. Calculate the TOTAL MUN for the entire invoice to distribute Extras
-  const totalInvoiceMun = baseProcessedItems.reduce((sum, it) => sum + (it.quantity / 40), 0);
+  // 2. We keep the base line totals (NO LONGER subtracting Extras from line totals)
   const parsedExtras = Number(extras) || 0;
-  
-  // 3. Proportional Extras Distribution:
-  const extraPerMun = totalInvoiceMun > 0 ? (parsedExtras / totalInvoiceMun) : 0;
-
-  let finalGrandTotalAmount = 0;
+  let finalGrandTotalFromItems = 0;
   const finalProcessedItems = baseProcessedItems.map(item => {
-    const itemMun = (item.quantity / 40);
-    const itemProportionalExtra = itemMun * extraPerMun;
-    
-    // Adjusted Line Total: Original line total minus its share of extras
-    const adjustedLineTotal = Math.max(0, Math.round(item.totalAmount - itemProportionalExtra));
-    finalGrandTotalAmount += adjustedLineTotal;
-
-    return {
-      ...item,
-      totalAmount: adjustedLineTotal
-    };
+    finalGrandTotalFromItems += item.totalAmount;
+    return item;
   });
 
-  const finalTotalAmount = Math.max(0, finalGrandTotalAmount + (Number(totalBardanaAmount) || 0) + (Number(totalMazdori) || 0));
+  const finalTotalAmount = Math.max(0, finalGrandTotalFromItems + (Number(totalBardanaAmount) || 0) + (Number(totalMazdori) || 0) - parsedExtras);
 
   const received = Number(amountReceived) || 0;
   let paymentStatus = 'pending';
@@ -281,15 +267,9 @@ export const update = async (req, res) => {
       const kpk = Number(item.kgPerKata) || 0;
       const dKg = Number(item.deductionKg) || 0;
       const aKg = Number(item.addKg) || 0;
-      
       const lineGross = Number(item.grossWeight) || Math.max(0, (k * kpk) - dKg + aKg);
-      
       const lineSHCut = sumLineGross > 0 ? (lineGross / sumLineGross) * cutTotal : 0;
       const lineNet = Math.max(0, lineGross - lineSHCut);
-      
-      const bRate = Number(item.bardanaRate) || 0;
-      const bardana = Number(item.bardanaAmount) || (k * bRate);
-      const mazdori = Number(item.mazdori) || 0;
       const rate = Number(item.rate) || 0;
       
       let lineTotal = 0;
@@ -312,40 +292,18 @@ export const update = async (req, res) => {
       };
     });
 
+    sale.items = baseProcessedItems;
     if (extras !== undefined) sale.extras = Number(extras) || 0;
     
-    // Proportional Distribution of Extras
-    const totalInvoiceMun = baseProcessedItems.reduce((sum, it) => sum + (it.quantity / 40), 0);
-    const extraPerMun = totalInvoiceMun > 0 ? (sale.extras / totalInvoiceMun) : 0;
-
-    let grandTotalAmountAfterExtras = 0;
-    sale.items = baseProcessedItems.map(item => {
-      const itemMun = (item.quantity / 40);
-      const itemProportionalExtra = itemMun * extraPerMun;
-      const adjustedLineTotal = Math.max(0, Math.round(item.totalAmount - itemProportionalExtra));
-      grandTotalAmountAfterExtras += adjustedLineTotal;
-
-      return {
-        ...item,
-        totalAmount: adjustedLineTotal
-      };
-    });
-
-    sale.totalAmount = Math.max(0, grandTotalAmountAfterExtras + (sale.totalBardanaAmount || 0) + (sale.totalMazdori || 0));
+    const itemsSum = sale.items.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+    sale.totalAmount = Math.max(0, itemsSum + (sale.totalBardanaAmount || 0) + (sale.totalMazdori || 0) - (sale.extras || 0));
   } else {
-    // If items aren't updated, but extras is:
-    if (extras !== undefined) {
-      const oldExtras = sale.extras || 0;
-      const newExtras = Number(extras) || 0;
-      sale.extras = newExtras;
-      
-      // Since we don't have the original base prices for the already-saved items in this block, 
-      // we rely on the totalAmount already having been adjusted. 
-      // Re-calculating correctly requires base prices. 
-      // HOWEVER, the frontend ALWAYS sends items, so the 'if' block above is the primary path.
-      // We adjust the grand total proportionally to the change in extras as a fallback.
-      sale.totalAmount = Math.max(0, (sale.items.reduce((sum, it) => sum + (it.totalAmount || 0), 0) + oldExtras) - newExtras);
-    }
+    // If items aren't updated, but extras or other fees are:
+    if (extras !== undefined) sale.extras = Number(extras) || 0;
+    
+    const itemsSum = sale.items.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+    sale.totalAmount = Math.max(0, itemsSum + (sale.totalBardanaAmount || 0) + (sale.totalMazdori || 0) - (sale.extras || 0));
+  }
   }
 
   if (amountReceived != null) sale.amountReceived = Number(amountReceived);
