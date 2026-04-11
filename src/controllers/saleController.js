@@ -304,6 +304,7 @@ export const update = async (req, res) => {
     const itemsSum = sale.items.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
     sale.totalAmount = Math.max(0, itemsSum + (sale.totalBardanaAmount || 0) + (sale.totalMazdori || 0) - (sale.extras || 0));
   }
+  }
 
   if (amountReceived != null) sale.amountReceived = Number(amountReceived);
 
