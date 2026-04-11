@@ -308,9 +308,10 @@ transactions.forEach(t => {
       }
     } else if (type === "transfer") {
       const isPartyTransfer = t.customerId && (t.supplierId || t.mazdoorId);
+      const isAccountToPartyTransfer = t.fromAccountId && (t.supplierId || t.mazdoorId);
 
-      if (isPartyTransfer) {
-        const customerName = t.customerId.name || "Customer";
+      if (isPartyTransfer || isAccountToPartyTransfer) {
+        const sourceName = t.customerId?.name || t.fromAccountId?.name || "Source";
         const recipientName = t.supplierId?.name || t.mazdoorId?.name || "Recipient";
 
         // 1. Source Side (Credit / Aamad)
@@ -319,7 +320,7 @@ transactions.forEach(t => {
           date: formatDateOnly(t.date),
           name: `Direct Transfer to ${recipientName}`,
           description: t.note || "Party-to-Party Transfer",
-          accountName: customerName,
+          accountName: sourceName,
           amount: t.amount,
           amountType: "in",
           isExternal: false, // Internal to the ledger ecosystem
@@ -330,7 +331,7 @@ transactions.forEach(t => {
         rows.push({
           type: "transfer_out",
           date: formatDateOnly(t.date),
-          name: `Direct Transfer from ${customerName}`,
+          name: `Direct Transfer from ${sourceName}`,
           description: t.note || "Party-to-Party Transfer",
           accountName: recipientName,
           amount: t.amount,
