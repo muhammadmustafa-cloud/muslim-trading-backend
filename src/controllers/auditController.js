@@ -510,7 +510,16 @@ export const getConsolidatedLedgers = async (req, res) => {
       allAccounts,
       allItems
     ] = await Promise.all([
-      Transaction.find(activityMatch).lean(),
+      Transaction.find(activityMatch)
+        .populate('customerId', 'name')
+        .populate('supplierId', 'name')
+        .populate('mazdoorId', 'name')
+        .populate('fromAccountId', 'name')
+        .populate('toAccountId', 'name')
+        .populate('expenseTypeId', 'name')
+        .populate('taxTypeId', 'name')
+        .populate('rawMaterialHeadId', 'name')
+        .lean(),
       Sale.find(activityMatch).populate('customerId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
       StockEntry.find(activityMatch).populate('supplierId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
       Customer.find({}).lean(),
@@ -567,25 +576,47 @@ export const getConsolidatedLedgers = async (req, res) => {
       let balance = Number(openingVal) || 0;
 
       if (type === 'customer') {
-        const [tIn, tOut, sTotal] = await Promise.all([
-          Transaction.aggregate([{ $match: { ...matchBefore, customerId: id, type: 'deposit' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
-          Transaction.aggregate([{ $match: { ...matchBefore, customerId: id, type: 'withdraw' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
+        const [trans, sales] = await Promise.all([
+          Transaction.aggregate([
+            { $match: { ...matchBefore, customerId: id } },
+            { $group: {
+              _id: null,
+              totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+              totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
+            }}
+          ]),
           Sale.aggregate([{ $match: { ...matchBefore, customerId: id } }, { $group: { _id: null, sum: { $sum: '$totalAmount' } } }])
         ]);
-        balance += (sTotal[0]?.sum || 0) - (tIn[0]?.sum || 0) + (tOut[0]?.sum || 0);
+        const t = trans[0] || { totalIn: 0, totalOut: 0 };
+        balance += (sales[0]?.sum || 0) - t.totalIn + t.totalOut;
+
       } else if (type === 'supplier') {
-        const [tIn, tOut, pTotal] = await Promise.all([
-          Transaction.aggregate([{ $match: { ...matchBefore, supplierId: id, type: 'deposit' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
-          Transaction.aggregate([{ $match: { ...matchBefore, supplierId: id, type: 'withdraw' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
+        const [trans, purch] = await Promise.all([
+          Transaction.aggregate([
+            { $match: { ...matchBefore, supplierId: id } },
+            { $group: {
+              _id: null,
+              totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
+              totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
+            }}
+          ]),
           StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }])
         ]);
-        balance += (tOut[0]?.sum || 0) - (tIn[0]?.sum || 0) - (pTotal[0]?.sum || 0);
+        const t = trans[0] || { totalIn: 0, totalOut: 0 };
+        balance += t.totalOut - t.totalIn - (purch[0]?.sum || 0);
+
       } else if (type === 'mazdoor') {
-        const [paid, earned] = await Promise.all([
-          Transaction.aggregate([{ $match: { ...matchBefore, mazdoorId: id, type: { $in: ['withdraw', 'salary'] } } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
-          Transaction.aggregate([{ $match: { ...matchBefore, mazdoorId: id, category: { $in: ['salary_accrual', 'mazdoor_expense'] } } }, { $group: { _id: null, sum: { $sum: '$amount' } } }])
+        const trans = await Transaction.aggregate([
+          { $match: { ...matchBefore, mazdoorId: id } },
+          { $group: {
+            _id: null,
+            paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary', 'transfer']] }] }, '$amount', 0] } },
+            earned: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['deposit', 'income']] }, { $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }] }, '$amount', 0] } }
+          }}
         ]);
-        balance += (earned[0]?.sum || 0) - (paid[0]?.sum || 0);
+        const t = trans[0] || { paid: 0, earned: 0 };
+        balance += t.earned - t.paid;
+
       } else if (type === 'expense') {
         const tx = await Transaction.aggregate([{ $match: { ...matchBefore, expenseTypeId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]);
         balance += (tx[0]?.sum || 0);
@@ -634,7 +665,18 @@ export const getConsolidatedLedgers = async (req, res) => {
       
       const ledger = [];
       sales.forEach(s => ledger.push({ date: s.date, description: `Sale Invoice (Truck: ${s.truckNumber || '-'})`, debit: s.totalAmount, credit: 0, bags: (s.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
-      trans.forEach(t => ledger.push({ date: t.date, description: `Payment: ${t.note || (t.type === 'deposit' ? 'Received' : 'Paid')}`, debit: t.type === 'withdraw' ? t.amount : 0, credit: t.type === 'deposit' ? t.amount : 0, bags: 0 }));
+      trans.forEach(t => {
+        const isCredit = t.type === 'deposit' || t.type === 'transfer' || t.type === 'income';
+        const otherSide = isCredit ? (t.toAccountId?.name || "Mill Cash") : (t.fromAccountId?.name || "Mill Cash");
+        const fallbackDesc = isCredit ? `Received in ${otherSide}` : `Paid via ${otherSide}`;
+        ledger.push({
+          date: t.date,
+          description: t.note || fallbackDesc,
+          debit: isCredit ? 0 : t.amount,
+          credit: isCredit ? t.amount : 0,
+          bags: 0
+        });
+      });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       consolidatedData.customers.push({ name: party.name, openingBalance: op, ledger });
@@ -650,7 +692,18 @@ export const getConsolidatedLedgers = async (req, res) => {
 
       const ledger = [];
       purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
-      trans.forEach(t => ledger.push({ date: t.date, description: `Payment: ${t.note || (t.type === 'withdraw' ? 'Paid' : 'Received')}`, debit: t.type === 'withdraw' ? t.amount : 0, credit: t.type === 'deposit' ? t.amount : 0, bags: 0 }));
+      trans.forEach(t => {
+        const isDebit = t.type === 'withdraw' || t.type === 'transfer' || t.type === 'expense';
+        const otherSide = isDebit ? (t.fromAccountId?.name || "Mill Cash") : (t.toAccountId?.name || "Mill Cash");
+        const fallbackDesc = isDebit ? `Paid via ${otherSide}` : `Received via ${otherSide}`;
+        ledger.push({
+          date: t.date,
+          description: t.note || fallbackDesc,
+          debit: isDebit ? t.amount : 0,
+          credit: !isDebit ? t.amount : 0,
+          bags: 0
+        });
+      });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       consolidatedData.suppliers.push({ name: party.name, openingBalance: op, ledger });
@@ -664,8 +717,15 @@ export const getConsolidatedLedgers = async (req, res) => {
       const trans = activeTrans.filter(t => t.mazdoorId?.toString() === mId);
       const ledger = [];
       trans.forEach(t => {
-        const isEarned = t.category === 'salary_accrual' || t.category === 'mazdoor_expense';
-        ledger.push({ date: t.date, description: t.note || (isEarned ? 'Salary Accrued' : 'Payment Made'), debit: !isEarned ? t.amount : 0, credit: isEarned ? t.amount : 0 });
+        const isEarned = t.category === 'salary_accrual' || t.category === 'mazdoor_expense' || t.type === 'deposit' || t.type === 'income';
+        const otherSide = t.fromAccountId?.name || t.toAccountId?.name || "Mill Cash";
+        const fallbackDesc = isEarned ? (t.type === 'income' ? 'Ledger Adjustment' : 'Work Earned/Brought In') : `Paid via ${otherSide}`;
+        ledger.push({ 
+          date: t.date, 
+          description: t.note || fallbackDesc, 
+          debit: !isEarned ? t.amount : 0, 
+          credit: isEarned ? t.amount : 0 
+        });
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.mazdoors.push({ name: party.name, openingBalance: op, ledger });
@@ -701,15 +761,26 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allAccounts.find(a => a._id.toString() === aId);
       if (!party) continue;
 
-      // Exclude internal/system accounts
+      // Exclude internal/system accounts from this detailed diary
       const lowerName = (party.name || "").toLowerCase();
       if (lowerName.includes("mill khata") || lowerName.includes("daily khata")) continue;
 
       const op = await getEntityOpeningBalance('account', party._id, party.openingBalance);
       const trans = activeTrans.filter(t => t.fromAccountId?.toString() === aId || t.toAccountId?.toString() === aId);
       const ledger = trans.map(t => {
-        const isIn = t.fromAccountId?.toString() === aId || t.fromAccountId?._id?.toString() === aId; // Source (From) = Credit/In
-        return { date: t.date, description: t.note || (isIn ? 'Inflow' : 'Outflow'), debit: isIn ? 0 : t.amount, credit: isIn ? t.amount : 0 };
+        // Broad inflow logic: if it's arriving at this account, it's a Credit (Aamad)
+        const isIn = t.toAccountId?.toString() === aId || t.toAccountId?._id?.toString() === aId;
+        
+        // Find the "other party" involved (Customer, Supplier, etc.)
+        const participant = t.customerId?.name || t.supplierId?.name || t.mazdoorId?.name || (isIn ? t.fromAccountId?.name : t.toAccountId?.name);
+        const fallbackDesc = isIn ? `From ${participant || 'Manual Deposit'}` : `To ${participant || 'General Expense'}`;
+
+        return { 
+          date: t.date, 
+          description: (t.note || fallbackDesc) + ` [${t.type.toUpperCase()}]`, 
+          debit: isIn ? 0 : t.amount, 
+          credit: isIn ? t.amount : 0 
+        };
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.accounts.push({ name: party.name, openingBalance: op, ledger });
