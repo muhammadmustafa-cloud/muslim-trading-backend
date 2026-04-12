@@ -111,14 +111,21 @@ export const getHistory = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-  // 1. Define Matches
-  const stockMatch = { supplierId: req.params.id };
+  // 1. Define Matches (Unified if linked)
+  const supId = req.params.id;
+  const custId = supplier.linkedCustomerId;
+
+  const stockMatch = { supplierId: supId };
   if (hasDateFilter) stockMatch.date = dateFilter;
 
-  const saleMatch = supplier.linkedCustomerId ? { customerId: supplier.linkedCustomerId } : null;
+  const saleMatch = custId ? { customerId: custId } : null;
   if (saleMatch && hasDateFilter) saleMatch.date = dateFilter;
 
-  const transMatch = { $or: [{ supplierId: req.params.id }] };
+  // Unified Transaction match
+  const transMatch = { $or: [{ supplierId: supId }] };
+  if (custId) {
+    transMatch.$or.push({ customerId: custId });
+  }
   if (hasDateFilter) transMatch.date = dateFilter;
 
   // 2. Fetch all data in parallel
@@ -132,7 +139,11 @@ export const getHistory = async (req, res) => {
   const entryIds = stockEntries.map(e => e._id);
   let entryTransactions = [];
   if (entryIds.length > 0) {
-    entryTransactions = await Transaction.find({ stockEntryId: { $in: entryIds }, supplierId: { $ne: req.params.id } }).lean();
+    const existingTransIds = transactions.map(t => t._id.toString());
+    entryTransactions = await Transaction.find({ 
+      stockEntryId: { $in: entryIds }, 
+      _id: { $nin: existingTransIds.map(id => new mongoose.Types.ObjectId(id)) } 
+    }).lean();
   }
 
   // 3. Transform into Ledger Entries

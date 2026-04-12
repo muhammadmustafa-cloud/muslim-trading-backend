@@ -111,15 +111,23 @@ export const getHistory = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-  // 1. Define Matches
-  const saleMatch = { customerId: req.params.id };
+  // 1. Define Matches (Unified if linked)
+  const custId = req.params.id;
+  const supId = customer.linkedSupplierId;
+
+  const saleMatch = { customerId: custId };
   if (hasDateFilter) saleMatch.date = dateFilter;
 
-  const stockMatch = customer.linkedSupplierId ? { supplierId: customer.linkedSupplierId } : null;
+  const stockMatch = supId ? { supplierId: supId } : null;
   if (stockMatch && hasDateFilter) stockMatch.date = dateFilter;
 
-  // Transaction match: either linked to a sale of this customer, or directly to this customer
-  const transMatch = { $or: [{ customerId: req.params.id }] };
+  // Unified Transaction match: Check both customer and linked supplier IDs
+  const transMatch = { 
+    $or: [{ customerId: custId }]
+  };
+  if (supId) {
+    transMatch.$or.push({ supplierId: supId });
+  }
   if (hasDateFilter) transMatch.date = dateFilter;
 
   // 2. Fetch all data in parallel
@@ -129,11 +137,16 @@ export const getHistory = async (req, res) => {
     Transaction.find(transMatch).populate('fromAccountId', 'name').populate('toAccountId', 'name').lean(),
   ]);
 
-  // If we have sales, we should also find transactions linked to those sales (backward compatibility)
+  // Backward compatibility: transactions linked via saleId
   const saleIds = sales.map(s => s._id);
   let saleTransactions = [];
   if (saleIds.length > 0) {
-    saleTransactions = await Transaction.find({ saleId: { $in: saleIds }, customerId: { $ne: req.params.id } }).lean();
+    // Only fetch those that aren't already in the transactions list
+    const existingTransIds = transactions.map(t => t._id.toString());
+    saleTransactions = await Transaction.find({ 
+      saleId: { $in: saleIds }, 
+      _id: { $nin: existingTransIds.map(id => new mongoose.Types.ObjectId(id)) } 
+    }).lean();
   }
 
   // 3. Transform into Ledger Entries

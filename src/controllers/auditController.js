@@ -555,8 +555,8 @@ export const getConsolidatedLedgers = async (req, res) => {
     ].filter(Boolean));
 
     const consolidatedData = {
-      customers: [],
-      suppliers: [],
+      customers: [], // Will contain unified ledgers for linked parties
+      suppliers: [], // Will contain only non-linked suppliers
       mazdoors: [],
       expenses: [],
       taxes: [],
@@ -568,27 +568,32 @@ export const getConsolidatedLedgers = async (req, res) => {
     };
 
     // Helper: Calculation of individual entity's opening balance as of fromDate
-    // Safe ID extractor: works for both plain ObjectId and populated objects
     const getId = (ref) => ref?._id?.toString() || ref?.toString() || null;
 
-    const getEntityOpeningBalance = async (type, id, openingVal = 0) => {
+    const getEntityOpeningBalance = async (type, id, openingVal = 0, linkedId = null) => {
       const matchBefore = { date: { $lt: fromDate } };
       let balance = Number(openingVal) || 0;
 
       if (type === 'customer') {
-        const [trans, sales] = await Promise.all([
+        // Unified balance if linked
+        const [trans, sales, linkedPurchases] = await Promise.all([
           Transaction.aggregate([
-            { $match: { ...matchBefore, customerId: id } },
+            { $match: { ...matchBefore, $or: [{ customerId: id }, { supplierId: linkedId }.filter(Boolean)] } },
             { $group: {
               _id: null,
               totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
               totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
             }}
           ]),
-          Sale.aggregate([{ $match: { ...matchBefore, customerId: id } }, { $group: { _id: null, sum: { $sum: '$totalAmount' } } }])
+          Sale.aggregate([{ $match: { ...matchBefore, customerId: id } }, { $group: { _id: null, sum: { $sum: '$totalAmount' } } }]),
+          linkedId ? StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: linkedId } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]) : []
         ]);
         const t = trans[0] || { totalIn: 0, totalOut: 0 };
-        balance += (sales[0]?.sum || 0) - t.totalIn + t.totalOut;
+        const s = sales[0] || { sum: 0 };
+        const lp = linkedPurchases[0] || { sum: 0 };
+        
+        // Final Balance = Base + Sales - Inflow + Outflow - Linked Purchases
+        balance = balance + s.sum - t.totalIn + t.totalOut - lp.sum;
 
       } else if (type === 'supplier') {
         const [trans, purch] = await Promise.all([
@@ -651,21 +656,31 @@ export const getConsolidatedLedgers = async (req, res) => {
         ]);
         balance += (sales[0]?.sum || 0) - (purchases[0]?.sum || 0);
       }
-
       return balance;
     };
 
-    // PROCESS CUSTOMERS
+    // TRACK PROCESSED SUPPLIERS TO AVOID DUPLICATION
+    const processedSupplierIds = new Set();
+
+    // PROCESS CUSTOMERS (Now with Unified Logic)
     for (const cId of activeCustomerIds) {
       const party = allCustomers.find(c => c._id.toString() === cId);
       if (!party) continue;
-      const op = await getEntityOpeningBalance('customer', party._id, party.openingBalance);
-      const trans = activeTrans.filter(t => getId(t.customerId) === cId);
+
+      const linkedId = party.linkedSupplierId?.toString();
+      const op = await getEntityOpeningBalance('customer', party._id, party.openingBalance, linkedId);
+      
+      const trans = activeTrans.filter(t => getId(t.customerId) === cId || (linkedId && getId(t.supplierId) === linkedId));
       const sales = activeSales.filter(s => getId(s.customerId) === cId);
+      const linkedPurchases = linkedId ? activePurchases.filter(p => getId(p.supplierId) === linkedId) : [];
       
       const ledger = [];
       sales.forEach(s => ledger.push({ date: s.date, description: `Sale Invoice (Truck: ${s.truckNumber || '-'})`, debit: s.totalAmount, credit: 0, bags: (s.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
+      linkedPurchases.forEach(p => ledger.push({ date: p.date, description: `Purchase Invoice (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
+      
       trans.forEach(t => {
+        // If it was a deposit/received -> Credit
+        // If it was a withdraw/paid -> Debit
         const isCredit = t.type === 'deposit' || t.type === 'transfer' || t.type === 'income';
         const otherSide = isCredit ? (t.toAccountId?.name || "Mill Cash") : (t.fromAccountId?.name || "Mill Cash");
         const fallbackDesc = isCredit ? `Received in ${otherSide}` : `Paid via ${otherSide}`;
@@ -679,11 +694,19 @@ export const getConsolidatedLedgers = async (req, res) => {
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      consolidatedData.customers.push({ name: party.name, openingBalance: op, ledger });
+      consolidatedData.customers.push({ 
+        name: party.name + (linkedId ? " (Cust/Sup)" : ""), 
+        openingBalance: op, 
+        ledger 
+      });
+
+      if (linkedId) processedSupplierIds.add(linkedId);
     }
 
-    // PROCESS SUPPLIERS
+    // PROCESS SUPPLIERS (Only those not already unified)
     for (const sId of activeSupplierIds) {
+      if (processedSupplierIds.has(sId)) continue;
+
       const party = allSuppliers.find(s => s._id.toString() === sId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('supplier', party._id, party.openingBalance);
