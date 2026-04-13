@@ -9,6 +9,7 @@ export const accountSchema = new mongoose.Schema(
     notes: { type: String, trim: true, default: '' },
     isDailyKhata: { type: Boolean, default: false },
     isMillKhata: { type: Boolean, default: false },
+    showMirrorInDailyMemo: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

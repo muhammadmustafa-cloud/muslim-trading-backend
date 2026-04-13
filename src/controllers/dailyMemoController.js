@@ -147,8 +147,8 @@ export const getDailyMemo = async (req, res) => {
   if (mazdoorId) currMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
 
   const transactions = await Transaction.find(currMatch)
-    .populate("fromAccountId", "name type isDailyKhata isMillKhata")
-    .populate("toAccountId", "name isDailyKhata isMillKhata")
+    .populate("fromAccountId", "name type isDailyKhata isMillKhata showMirrorInDailyMemo")
+    .populate("toAccountId", "name isDailyKhata isMillKhata showMirrorInDailyMemo")
     .populate("supplierId", "name")
     .populate("customerId", "name")
     .populate("mazdoorId", "name")
@@ -259,8 +259,8 @@ transactions.forEach(t => {
         referenceId: t._id,
       });
 
-      // 2. Contra Move: Money received from Participant (Debit/Kharch) - ONLY if participant exists
-      if (hasParty) {
+      // 2. Contra Move: Money received from Participant (Debit/Kharch) - ONLY if participant exists AND mirroring enabled
+      if (hasParty && t.toAccountId?.showMirrorInDailyMemo !== false) {
         rows.push({
           type: category || "deposit",
           date: formatDateOnly(t.date),
@@ -290,9 +290,8 @@ transactions.forEach(t => {
       });
 
       // 2. Contra Move (Aamne-Samne): opposite side of the transaction
-      // For Cash/Mill accounts: only when customer/supplier party exists (existing behavior)
-      // For Bank accounts: always generate contra for Tax/Expense/Salary/Mazdoor
-      const shouldContra = hasParty || (isBankSource && displayName);
+      // Added check for showMirrorInDailyMemo to allow single-sided entries
+      const shouldContra = (hasParty || (isBankSource && displayName)) && t.fromAccountId?.showMirrorInDailyMemo !== false;
       if (shouldContra) {
         rows.push({
           type: category || type,
@@ -341,8 +340,12 @@ transactions.forEach(t => {
         });
       } else {
         // Internal standard account-to-account transfers
-        rows.push({ type: "transfer_out", date: formatDateOnly(t.date), name: t.fromAccountId?.name || "Account", description: `Transfer to ${t.toAccountId?.name || "—"}`, accountName: t.fromAccountId?.name || "Manual", amount: t.amount, amountType: "in", isExternal, referenceId: t._id });
-        rows.push({ type: "transfer_in", date: formatDateOnly(t.date), name: t.toAccountId?.name || "Account", description: `Transfer from ${t.fromAccountId?.name || "—"}`, accountName: t.toAccountId?.name || "Manual", amount: t.amount, amountType: "out", isExternal, referenceId: t._id });
+        if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
+          rows.push({ type: "transfer_out", date: formatDateOnly(t.date), name: t.fromAccountId?.name || "Account", description: `Transfer to ${t.toAccountId?.name || "—"}`, accountName: t.fromAccountId?.name || "Manual", amount: t.amount, amountType: "in", isExternal, referenceId: t._id });
+        }
+        if (t.toAccountId?.showMirrorInDailyMemo !== false) {
+          rows.push({ type: "transfer_in", date: formatDateOnly(t.date), name: t.toAccountId?.name || "Account", description: `Transfer from ${t.fromAccountId?.name || "—"}`, accountName: t.toAccountId?.name || "Manual", amount: t.amount, amountType: "out", isExternal, referenceId: t._id });
+        }
       }
     }
   });

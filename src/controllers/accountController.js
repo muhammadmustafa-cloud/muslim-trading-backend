@@ -32,7 +32,7 @@ export const getById = async (req, res) => {
 
 export const create = async (req, res) => {
   const { Account } = req.models;
-  const { name, type, accountNumber, openingBalance, notes } = req.body;
+  const { name, type, accountNumber, openingBalance, notes, showMirrorInDailyMemo } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
@@ -42,6 +42,7 @@ export const create = async (req, res) => {
     accountNumber: (accountNumber || '').trim(),
     openingBalance: Number(openingBalance) || 0,
     notes: (notes || '').trim(),
+    showMirrorInDailyMemo: showMirrorInDailyMemo !== undefined ? showMirrorInDailyMemo : true,
   });
   res.status(201).json({ success: true, data: account });
 };
@@ -59,6 +60,9 @@ export const update = async (req, res) => {
   };
   if (req.body.openingBalance !== undefined && req.body.openingBalance !== null) {
     updateFields.openingBalance = Number(req.body.openingBalance) || 0;
+  }
+  if (req.body.showMirrorInDailyMemo !== undefined) {
+    updateFields.showMirrorInDailyMemo = !!req.body.showMirrorInDailyMemo;
   }
   const account = await Account.findByIdAndUpdate(
     req.params.id,
