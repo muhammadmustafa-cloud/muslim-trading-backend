@@ -576,9 +576,11 @@ export const getConsolidatedLedgers = async (req, res) => {
 
       if (type === 'customer') {
         // Unified balance if linked
+        const orFilter = [{ customerId: id }];
+        if (linkedId) orFilter.push({ supplierId: linkedId });
         const [trans, sales, linkedPurchases] = await Promise.all([
           Transaction.aggregate([
-            { $match: { ...matchBefore, $or: [{ customerId: id }, { supplierId: linkedId }.filter(Boolean)] } },
+            { $match: { ...matchBefore, $or: orFilter } },
             { $group: {
               _id: null,
               totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
