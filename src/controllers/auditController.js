@@ -485,7 +485,8 @@ export const getConsolidatedLedgers = async (req, res) => {
   try {
     const { 
       Transaction, Sale, StockEntry, Customer, Supplier, 
-      Mazdoor, ExpenseType, TaxType, RawMaterialHead, Account, Item 
+      Mazdoor, ExpenseType, TaxType, RawMaterialHead, Account, Item,
+      MachineryItem, MillExpense
     } = req.models;
     const { dateFrom, dateTo } = req.query;
     const toDateStr = dateTo || new Date().toISOString().slice(0, 10);
@@ -519,6 +520,7 @@ export const getConsolidatedLedgers = async (req, res) => {
         .populate('expenseTypeId', 'name')
         .populate('taxTypeId', 'name')
         .populate('rawMaterialHeadId', 'name')
+        .populate('machineryPurchaseId')
         .lean(),
       Sale.find(activityMatch).populate('customerId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
       StockEntry.find(activityMatch).populate('supplierId', 'name address phone').populate('items.itemId', 'name').populate('accountId', 'name').lean(),
@@ -529,9 +531,14 @@ export const getConsolidatedLedgers = async (req, res) => {
       TaxType.find({}).lean(),
       RawMaterialHead.find({}).lean(),
       Account.find({}).lean(),
-      Item.find({}).lean()
+      Item.find({}).lean(),
+      MachineryItem.find({}).lean(),
+      MillExpense.find({}).lean()
     ]);
 
+
+    // Helper: Calculation of individual entity's ID
+    const getId = (ref) => ref?._id?.toString() || ref?.toString() || null;
 
     const activeCustomerIds = new Set([
       ...activeTrans.map(t => t.customerId?._id?.toString() || t.customerId?.toString()).filter(Boolean),
@@ -541,17 +548,19 @@ export const getConsolidatedLedgers = async (req, res) => {
       ...activeTrans.map(t => t.supplierId?._id?.toString() || t.supplierId?.toString()).filter(Boolean),
       ...activePurchases.map(p => p.supplierId?._id?.toString() || p.supplierId?.toString()).filter(Boolean)
     ]);
-    const activeMazdoorIds = new Set([...activeTrans.map(t => t.mazdoorId?.toString()).filter(Boolean)]);
-    const activeExpenseTypeIds = new Set([...activeTrans.map(t => t.expenseTypeId?.toString()).filter(Boolean)]);
-    const activeTaxTypeIds = new Set([...activeTrans.map(t => t.taxTypeId?.toString()).filter(Boolean)]);
-    const activeRawMaterialHeadIds = new Set([...activeTrans.map(t => t.rawMaterialHeadId?.toString()).filter(Boolean)]);
+    const activeMazdoorIds = new Set([...activeTrans.map(t => getId(t.mazdoorId)).filter(Boolean)]);
+    const activeExpenseTypeIds = new Set([...activeTrans.map(t => getId(t.expenseTypeId)).filter(Boolean)]);
+    const activeTaxTypeIds = new Set([...activeTrans.map(t => getId(t.taxTypeId)).filter(Boolean)]);
+    const activeRawMaterialHeadIds = new Set([...activeTrans.map(t => getId(t.rawMaterialHeadId)).filter(Boolean)]);
     const activeAccountIds = new Set([
-      ...activeTrans.map(t => t.fromAccountId?.toString()).filter(Boolean),
-      ...activeTrans.map(t => t.toAccountId?.toString()).filter(Boolean)
+      ...activeTrans.map(t => getId(t.fromAccountId)).filter(Boolean),
+      ...activeTrans.map(t => getId(t.toAccountId)).filter(Boolean)
     ]);
+    const activeMachineryItemIds = new Set([...activeTrans.map(t => getId(t.machineryPurchaseId?.machineryItemId) || getId(t.machineryItemId)).filter(Boolean)]);
+    const activeMillExpenseIds = new Set(activeTrans.filter(t => t.category === 'mill_expense').map(t => t.category));
     const activeItemIds = new Set([
-      ...activeSales.reduce((acc, s) => [...acc, ...(s.items || []).map(i => i.itemId?._id?.toString() || i.itemId?.toString())], []),
-      ...activePurchases.reduce((acc, p) => [...acc, ...(p.items || []).map(i => i.itemId?._id?.toString() || i.itemId?.toString())], [])
+      ...activeSales.reduce((acc, s) => [...acc, ...(s.items || []).map(i => getId(i.itemId))], []),
+      ...activePurchases.reduce((acc, p) => [...acc, ...(p.items || []).map(i => getId(i.itemId))], [])
     ].filter(Boolean));
 
     const consolidatedData = {
@@ -563,12 +572,13 @@ export const getConsolidatedLedgers = async (req, res) => {
       rawMaterials: [],
       accounts: [],
       items: [],
+      machinery: [],
+      millExpenses: [],
       salesInvoices: activeSales,
       purchaseInvoices: activePurchases
     };
 
     // Helper: Calculation of individual entity's opening balance as of fromDate
-    const getId = (ref) => ref?._id?.toString() || ref?.toString() || null;
 
     const getEntityOpeningBalance = async (type, id, openingVal = 0, linkedId = null) => {
       const matchBefore = { date: { $lt: fromDate } };
@@ -629,6 +639,19 @@ export const getConsolidatedLedgers = async (req, res) => {
         balance += (tx[0]?.sum || 0);
       } else if (type === 'tax') {
         const tx = await Transaction.aggregate([{ $match: { ...matchBefore, taxTypeId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]);
+        balance += (tx[0]?.sum || 0);
+      } else if (type === 'machinery') {
+        const itemObjId = new mongoose.Types.ObjectId(id);
+        const mpAgg = await Transaction.aggregate([
+          { $match: { ...matchBefore, machineryPurchaseId: { $ne: null } } },
+          { $lookup: { from: 'machinerypurchases', localField: 'machineryPurchaseId', foreignField: '_id', as: 'mp' } },
+          { $unwind: '$mp' },
+          { $match: { 'mp.machineryItemId': itemObjId } },
+          { $group: { _id: null, sum: { $sum: '$amount' } } }
+        ]);
+        balance += (mpAgg[0]?.sum || 0);
+      } else if (type === 'mill') {
+        const tx = await Transaction.aggregate([{ $match: { ...matchBefore, category: 'mill_expense' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]);
         balance += (tx[0]?.sum || 0);
       } else if (type === 'raw') {
         const tx = await Transaction.aggregate([
@@ -739,7 +762,7 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allMazdoors.find(m => m._id.toString() === mId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('mazdoor', party._id, 0);
-      const trans = activeTrans.filter(t => t.mazdoorId?.toString() === mId);
+      const trans = activeTrans.filter(t => getId(t.mazdoorId) === mId);
       const ledger = [];
       trans.forEach(t => {
         const isEarned = t.category === 'salary_accrual' || t.category === 'mazdoor_expense' || t.type === 'deposit' || t.type === 'income';
@@ -761,7 +784,7 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allExpenseTypes.find(e => e._id.toString() === eId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('expense', party._id, 0);
-      const trans = activeTrans.filter(t => t.expenseTypeId?.toString() === eId);
+      const trans = activeTrans.filter(t => getId(t.expenseTypeId) === eId);
       const ledger = trans.map(t => ({ date: t.date, description: t.note || 'General Expense', debit: t.amount, credit: 0 }));
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.expenses.push({ name: party.name, openingBalance: op, ledger });
@@ -772,13 +795,44 @@ export const getConsolidatedLedgers = async (req, res) => {
       const party = allRawMaterialHeads.find(rw => rw._id.toString() === rwId);
       if (!party) continue;
       const op = await getEntityOpeningBalance('raw', party._id, 0);
-      const trans = activeTrans.filter(t => t.rawMaterialHeadId?.toString() === rwId);
+      const trans = activeTrans.filter(t => getId(t.rawMaterialHeadId) === rwId);
       const ledger = trans.map(t => {
         const isIn = t.type === 'deposit' || t.type === 'sale' || t.type === 'income';
         return { date: t.date, description: t.note || (isIn ? 'Stock In' : 'Stock Out'), debit: !isIn ? t.amount : 0, credit: isIn ? t.amount : 0 };
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.rawMaterials.push({ name: party.name, openingBalance: op, ledger });
+    }
+
+    // PROCESS TAXES
+    for (const tId of activeTaxTypeIds) {
+      const party = allTaxTypes.find(t => t._id.toString() === tId);
+      if (!party) continue;
+      const op = await getEntityOpeningBalance('tax', party._id, 0);
+      const trans = activeTrans.filter(t => getId(t.taxTypeId) === tId);
+      const ledger = trans.map(t => ({ date: t.date, description: t.note || 'Tax Payment', debit: t.amount, credit: 0 }));
+      ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
+      consolidatedData.taxes.push({ name: party.name, openingBalance: op, ledger });
+    }
+
+    // PROCESS MACHINERY
+    for (const mId of activeMachineryItemIds) {
+      const party = allMachineryItems.find(m => m._id.toString() === mId);
+      if (!party) continue;
+      const op = await getEntityOpeningBalance('machinery', party._id, 0);
+      const trans = activeTrans.filter(t => getId(t.machineryPurchaseId?.machineryItemId) === mId || getId(t.machineryItemId) === mId);
+      const ledger = trans.map(t => ({ date: t.date, description: t.note || 'Machinery/Asset Purchase', debit: t.amount, credit: 0 }));
+      ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
+      consolidatedData.machinery.push({ name: party.name, openingBalance: op, ledger });
+    }
+
+    // PROCESS MILL EXPENSES (General category entries not tied to specific heads)
+    if (activeMillExpenseIds.size > 0) {
+      const op = await getEntityOpeningBalance('mill', 'mill_expense', 0);
+      const trans = activeTrans.filter(t => t.category === 'mill_expense');
+      const ledger = trans.map(t => ({ date: t.date, description: t.note || 'Mill General Expense', debit: t.amount, credit: 0 }));
+      ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
+      consolidatedData.millExpenses.push({ name: "Mill General Activity", openingBalance: op, ledger });
     }
 
     // PROCESS ACCOUNTS
@@ -791,10 +845,10 @@ export const getConsolidatedLedgers = async (req, res) => {
       if (lowerName.includes("mill khata") || lowerName.includes("daily khata")) continue;
 
       const op = await getEntityOpeningBalance('account', party._id, party.openingBalance);
-      const trans = activeTrans.filter(t => t.fromAccountId?.toString() === aId || t.toAccountId?.toString() === aId);
+      const trans = activeTrans.filter(t => getId(t.fromAccountId) === aId || getId(t.toAccountId) === aId);
       const ledger = trans.map(t => {
         // Broad inflow logic: if it's arriving at this account, it's a Credit (Aamad)
-        const isIn = t.toAccountId?.toString() === aId || t.toAccountId?._id?.toString() === aId;
+        const isIn = getId(t.toAccountId) === aId;
         
         // Find the "other party" involved (Customer, Supplier, etc.)
         const participant = t.customerId?.name || t.supplierId?.name || t.mazdoorId?.name || (isIn ? t.fromAccountId?.name : t.toAccountId?.name);
