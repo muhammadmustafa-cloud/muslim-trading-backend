@@ -100,14 +100,14 @@ export const create = async (req, res) => {
     }
 
     // Distribute Extras, Bardana and Mazdoori per MUN (like Sales system)
-    const totalBardanaAmount = Number(totalBardanaAmount) || 0;
-    const totalMazdori = Number(totalMazdori) || 0;
+    const bardanaAmount = Number(totalBardanaAmount) || 0;
+    const mazdoriAmount = Number(totalMazdori) || 0;
     const parsedExtras = Number(extras) || 0;
     const totalMun = netTotal / 40;
     
     const extraPerMun = totalMun > 0 ? parsedExtras / totalMun : 0;
-    const bardanaPerMun = totalMun > 0 ? totalBardanaAmount / totalMun : 0;
-    const mazdoriPerMun = totalMun > 0 ? totalMazdori / totalMun : 0;
+    const bardanaPerMun = totalMun > 0 ? bardanaAmount / totalMun : 0;
+    const mazdoriPerMun = totalMun > 0 ? mazdoriAmount / totalMun : 0;
     
     const itemExtra = lineMun * extraPerMun;
     const itemBardana = lineMun * bardanaPerMun;
@@ -269,14 +269,14 @@ export const update = async (req, res) => {
       }
 
       // Distribute Extras, Bardana and Mazdoori per MUN (like Sales system)
-      const totalBardanaAmount = Number(entry.totalBardanaAmount) || 0;
-      const totalMazdori = Number(entry.totalMazdori) || 0;
+      const bardanaAmount = Number(entry.totalBardanaAmount) || 0;
+      const mazdoriAmount = Number(entry.totalMazdori) || 0;
       const totalExtras = Number(entry.extras) || 0;
       const totalMun = (grossTotal - cutTotal) / 40;
       
       const extraPerMun = totalMun > 0 ? totalExtras / totalMun : 0;
-      const bardanaPerMun = totalMun > 0 ? totalBardanaAmount / totalMun : 0;
-      const mazdoriPerMun = totalMun > 0 ? totalMazdori / totalMun : 0;
+      const bardanaPerMun = totalMun > 0 ? bardanaAmount / totalMun : 0;
+      const mazdoriPerMun = totalMun > 0 ? mazdoriAmount / totalMun : 0;
       
       const itemExtra = lineMun * extraPerMun;
       const itemBardana = lineMun * bardanaPerMun;
