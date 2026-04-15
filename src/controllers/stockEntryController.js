@@ -62,45 +62,72 @@ export const create = async (req, res) => {
 
   let grandTotalAmount = 0;
   
-  // Process each item
+  // Process each item - simplified approach
+  const validItems = items.filter(item => item.itemId);
+  const itemCount = validItems.length;
+  
   const processedItems = items.map(item => {
-    const k = Number(item.kattay) || 0;
-    const kg = Number(item.kgPerKata) || 0;
-    const dKg = Number(item.deductionKg) || 0;
-    const aKg = Number(item.addKg) || 0;
-    const lineGross = Number(item.grossWeight) || Math.max(0, (k * kg) - dKg + aKg);
-    
-    // Proportional SH Cut OR Standard 0.25kg rule
-    let lineSHCut = 0;
-    if (cutTotal > 0 && grossTotal > 0) {
-      lineSHCut = (lineGross / grossTotal) * cutTotal;
-    } else {
-      lineSHCut = Number(((lineGross / 40) * 0.25).toFixed(2));
+    if (!item.itemId) {
+      // Return empty item for invalid entries
+      return {
+        itemId: item.itemId || null,
+        kattay: Number(item.kattay) || 0,
+        kgPerKata: 0,
+        deductionKg: Number(item.deductionKg) || 0,
+        addKg: Number(item.addKg) || 0,
+        grossWeight: 0,
+        shCut: 0,
+        itemNetWeight: 0,
+        rate: Number(item.rate) || 0,
+        amount: 0
+      };
     }
-    
+
+    // Equal distribution of total weight among valid items
+    const ratio = itemCount > 0 ? 1 / itemCount : 0;
+    const lineGross = grossTotal * ratio;
+    const lineSHCut = cutTotal * ratio;
     const lineNet = Math.max(0, lineGross - lineSHCut);
+    const lineMun = lineNet / 40;
     const r = Number(item.rate) || 0;
-    const bardana = Number(item.bardanaAmount) || 0;
     
-    let lineTotal = 0;
+    // Base amount calculation
+    let lineTotalBase = 0;
     if (lineNet > 0 && r > 0) {
-      lineTotal = Math.round((lineNet / 40) * r);
+      lineTotalBase = Math.round(lineMun * r);
     } else {
-      lineTotal = Number(item.amount) || 0;
+      lineTotalBase = Number(item.amount) || 0;
     }
+
+    // Distribute Extras, Bardana and Mazdoori per MUN (like Sales system)
+    const totalBardanaAmount = Number(totalBardanaAmount) || 0;
+    const totalMazdori = Number(totalMazdori) || 0;
+    const parsedExtras = Number(extras) || 0;
+    const totalMun = netTotal / 40;
+    
+    const extraPerMun = totalMun > 0 ? parsedExtras / totalMun : 0;
+    const bardanaPerMun = totalMun > 0 ? totalBardanaAmount / totalMun : 0;
+    const mazdoriPerMun = totalMun > 0 ? totalMazdori / totalMun : 0;
+    
+    const itemExtra = lineMun * extraPerMun;
+    const itemBardana = lineMun * bardanaPerMun;
+    const itemMazdori = lineMun * mazdoriPerMun;
+    const lineTotal = Math.round(lineTotalBase + itemBardana + itemMazdori - itemExtra);
 
     grandTotalAmount += lineTotal;
 
     return {
       itemId: item.itemId,
-      kattay: k,
-      kgPerKata: kg,
-      deductionKg: dKg,
-      addKg: aKg,
+      kattay: Number(item.kattay) || 0,
+      kgPerKata: 0, // Not used in simplified approach
+      deductionKg: Number(item.deductionKg) || 0,
+      addKg: Number(item.addKg) || 0,
       grossWeight: lineGross,
       shCut: lineSHCut,
       itemNetWeight: lineNet,
       rate: r,
+      bardanaAmount: itemBardana,
+      extrasAmount: itemExtra,
       amount: lineTotal
     };
   });
@@ -205,42 +232,71 @@ export const update = async (req, res) => {
 
   if (items && Array.isArray(items)) {
     let grandTotalAmount = 0;
+    const validItems = items.filter(item => item.itemId);
+    const itemCount = validItems.length;
+    
     entry.items = items.map(item => {
-      const k = Number(item.kattay) || 0;
-      const kg = Number(item.kgPerKata) || 0;
-      const dKg = Number(item.deductionKg) || 0;
-      const aKg = Number(item.addKg) || 0;
-      const lineGross = Number(item.grossWeight) || Math.max(0, (k * kg) - dKg + aKg);
-      
-      let lineSHCut = 0;
-      if (cutTotal > 0 && grossTotal > 0) {
-        lineSHCut = (lineGross / grossTotal) * cutTotal;
-      } else {
-        lineSHCut = Number(((lineGross / 40) * 0.25).toFixed(2));
+      if (!item.itemId) {
+        // Return empty item for invalid entries
+        return {
+          itemId: item.itemId || null,
+          kattay: Number(item.kattay) || 0,
+          kgPerKata: 0,
+          deductionKg: Number(item.deductionKg) || 0,
+          addKg: Number(item.addKg) || 0,
+          grossWeight: 0,
+          shCut: 0,
+          itemNetWeight: 0,
+          rate: Number(item.rate) || 0,
+          amount: 0
+        };
       }
-      
+
+      // Equal distribution of total weight among valid items
+      const ratio = itemCount > 0 ? 1 / itemCount : 0;
+      const lineGross = grossTotal * ratio;
+      const lineSHCut = cutTotal * ratio;
       const lineNet = Math.max(0, lineGross - lineSHCut);
+      const lineMun = lineNet / 40;
       const r = Number(item.rate) || 0;
-      const bardana = Number(item.bardanaAmount) || 0;
       
-      let lineTotal = 0;
+      // Base amount calculation
+      let lineTotalBase = 0;
       if (lineNet > 0 && r > 0) {
-        lineTotal = Math.round((lineNet / 40) * r);
+        lineTotalBase = Math.round(lineMun * r);
       } else {
-        lineTotal = Number(item.amount) || 0;
+        lineTotalBase = Number(item.amount) || 0;
       }
+
+      // Distribute Extras, Bardana and Mazdoori per MUN (like Sales system)
+      const totalBardanaAmount = Number(entry.totalBardanaAmount) || 0;
+      const totalMazdori = Number(entry.totalMazdori) || 0;
+      const totalExtras = Number(entry.extras) || 0;
+      const totalMun = (grossTotal - cutTotal) / 40;
+      
+      const extraPerMun = totalMun > 0 ? totalExtras / totalMun : 0;
+      const bardanaPerMun = totalMun > 0 ? totalBardanaAmount / totalMun : 0;
+      const mazdoriPerMun = totalMun > 0 ? totalMazdori / totalMun : 0;
+      
+      const itemExtra = lineMun * extraPerMun;
+      const itemBardana = lineMun * bardanaPerMun;
+      const itemMazdori = lineMun * mazdoriPerMun;
+      const lineTotal = Math.round(lineTotalBase + itemBardana + itemMazdori - itemExtra);
+      
       grandTotalAmount += lineTotal;
 
       return {
         itemId: item.itemId,
-        kattay: k,
-        kgPerKata: kg,
-        deductionKg: dKg,
-        addKg: aKg,
+        kattay: Number(item.kattay) || 0,
+        kgPerKata: 0, // Not used in simplified approach
+        deductionKg: Number(item.deductionKg) || 0,
+        addKg: Number(item.addKg) || 0,
         grossWeight: lineGross,
         shCut: lineSHCut,
         itemNetWeight: lineNet,
         rate: r,
+        bardanaAmount: itemBardana,
+        extrasAmount: itemExtra,
         amount: lineTotal
       };
     });
