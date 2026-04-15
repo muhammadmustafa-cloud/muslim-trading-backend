@@ -704,16 +704,33 @@ export const getConsolidatedLedgers = async (req, res) => {
       linkedPurchases.forEach(p => ledger.push({ date: p.date, description: `Purchase Invoice (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
       
       trans.forEach(t => {
-        // If it was a deposit/received -> Credit
-        // If it was a withdraw/paid -> Debit
-        const isCredit = t.type === 'deposit' || t.type === 'transfer' || t.type === 'income';
-        const otherSide = isCredit ? (t.toAccountId?.name || "Mill Cash") : (t.fromAccountId?.name || "Mill Cash");
-        const fallbackDesc = isCredit ? `Received in ${otherSide}` : `Paid via ${otherSide}`;
+        // Customer Ledger Logic:
+        // Deposit = Customer paid to mill = CREDIT (Aamad - mill ko paise aaye)
+        // Withdraw = Mill paid to customer = DEBIT (Kharch - mill se paise gaye)
+        // Income = Mill received from customer = CREDIT (Aamad)
+        // Transfer = depends on direction
+        const isCredit = t.type === 'deposit' || t.type === 'income';
+        const isDebit = t.type === 'withdraw' || t.type === 'expense';
+        
+        // For transfers, we need to check direction
+        let transferDirection = null;
+        if (t.type === 'transfer') {
+          // If money is coming TO mill account from customer = Credit
+          // If money is going FROM mill account to customer = Debit
+          transferDirection = 'neutral'; // Default to neutral for safety
+        }
+        
+        const finalCredit = isCredit || (t.type === 'transfer' && transferDirection === 'credit');
+        const finalDebit = isDebit || (t.type === 'transfer' && transferDirection === 'debit');
+        
+        const otherSide = finalCredit ? (t.fromAccountId?.name || "Customer") : (t.toAccountId?.name || "Customer");
+        const fallbackDesc = finalCredit ? `Received from ${otherSide}` : `Paid to ${otherSide}`;
+        
         ledger.push({
           date: t.date,
           description: t.note || fallbackDesc,
-          debit: isCredit ? 0 : t.amount,
-          credit: isCredit ? t.amount : 0,
+          debit: finalDebit ? t.amount : 0,
+          credit: finalCredit ? t.amount : 0,
           bags: 0
         });
       });
@@ -741,14 +758,31 @@ export const getConsolidatedLedgers = async (req, res) => {
       const ledger = [];
       purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
       trans.forEach(t => {
-        const isDebit = t.type === 'withdraw' || t.type === 'transfer' || t.type === 'expense';
-        const otherSide = isDebit ? (t.fromAccountId?.name || "Mill Cash") : (t.toAccountId?.name || "Mill Cash");
-        const fallbackDesc = isDebit ? `Paid via ${otherSide}` : `Received via ${otherSide}`;
+        // Supplier Ledger Logic:
+        // Withdraw = Mill paid to supplier = CREDIT (Aamad - supplier ko paise aaye)
+        // Deposit = Supplier paid to mill = DEBIT (Kharch - supplier se paise gaye)
+        // Expense = Mill expense paid to supplier = CREDIT (Aamad)
+        // Transfer = depends on direction
+        const isCredit = t.type === 'withdraw' || t.type === 'expense';
+        const isDebit = t.type === 'deposit';
+        
+        // For transfers, we need to check direction
+        let transferDirection = null;
+        if (t.type === 'transfer') {
+          transferDirection = 'neutral'; // Default to neutral for safety
+        }
+        
+        const finalCredit = isCredit || (t.type === 'transfer' && transferDirection === 'credit');
+        const finalDebit = isDebit || (t.type === 'transfer' && transferDirection === 'debit');
+        
+        const otherSide = finalCredit ? (t.toAccountId?.name || "Supplier") : (t.fromAccountId?.name || "Supplier");
+        const fallbackDesc = finalCredit ? `Paid to ${otherSide}` : `Received from ${otherSide}`;
+        
         ledger.push({
           date: t.date,
           description: t.note || fallbackDesc,
-          debit: isDebit ? t.amount : 0,
-          credit: !isDebit ? t.amount : 0,
+          debit: finalDebit ? t.amount : 0,
+          credit: finalCredit ? t.amount : 0,
           bags: 0
         });
       });
