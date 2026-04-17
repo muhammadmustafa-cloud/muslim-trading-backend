@@ -85,19 +85,16 @@ export const getDailyMemo = async (req, res) => {
                   { $and: [!!supplierId, { $eq: ["$type", "deposit"] }] },
                   { $and: [!!mazdoorId, { $eq: ["$category", "salary_accrual"] }] },
                   /**
-                   * Case D: Mill → External (Bank) Transfer → Count in Credit (totalIn)
-                   * Scenario: Mill Khata sends money to a Bank Account.
-                   * fromAccountId = Mill ✅ (already in totalOut)
-                   * toAccountId   = Bank ❌ (not a mill account)
-                   * We explicitly credit it here so the gross transfer is visible on BOTH sides.
-                   * Net closing balance is unaffected (totalIn & totalOut both +amount → cancel).
+                   * Case D: ALL Transfers INTO Mill Accounts → Count in Credit (totalIn)
+                   * This handles: External→Mill, Mill→Mill transfers
+                   * Mill→External is handled in totalOut, creating net-zero effect for internal transfers
+                   * and proper accounting for external transfers.
                    */
                   {
                     $and: [
                       !accountId && !customerId && !supplierId && !mazdoorId, // Full Mill view only
                       { $eq: ["$type", "transfer"] },
-                      { $in: ["$fromAccountId", millAccObjectIdIds] },        // FROM a mill account
-                      { $not: { $in: ["$toAccountId", millAccObjectIdIds] } } // TO an external (bank) account
+                      { $in: ["$toAccountId", millAccObjectIdIds] }        // ANY transfer TO mill account
                     ]
                   },
                 ],
