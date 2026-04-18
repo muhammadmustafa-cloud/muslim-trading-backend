@@ -499,8 +499,8 @@ export const getConsolidatedLedgers = async (req, res) => {
         .populate('customerId', 'name')
         .populate('supplierId', 'name')
         .populate('mazdoorId', 'name')
-        .populate('fromAccountId', 'name')
-        .populate('toAccountId', 'name')
+        .populate('fromAccountId', 'name isMillKhata isDailyKhata')
+        .populate('toAccountId', 'name isMillKhata isDailyKhata')
         .populate('expenseTypeId', 'name')
         .populate('taxTypeId', 'name')
         .populate('rawMaterialHeadId', 'name')
@@ -572,51 +572,103 @@ export const getConsolidatedLedgers = async (req, res) => {
         // Unified balance if linked
         const orFilter = [{ customerId: id }];
         if (linkedId) orFilter.push({ supplierId: linkedId });
-        const [trans, sales, linkedPurchases] = await Promise.all([
-          Transaction.aggregate([
-            { $match: { ...matchBefore, $or: orFilter } },
-            { $group: {
-              _id: null,
-              totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
-              totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
-            }}
-          ]),
+        
+        // Fetch transactions with account data for proper transfer direction detection
+        const [transData, sales, linkedPurchases] = await Promise.all([
+          Transaction.find({ ...matchBefore, $or: orFilter })
+            .populate('fromAccountId', 'name isMillKhata isDailyKhata')
+            .populate('toAccountId', 'name isMillKhata isDailyKhata')
+            .lean(),
           Sale.aggregate([{ $match: { ...matchBefore, customerId: id } }, { $group: { _id: null, sum: { $sum: '$totalAmount' } } }]),
           linkedId ? StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: linkedId } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]) : []
         ]);
-        const t = trans[0] || { totalIn: 0, totalOut: 0 };
+        
+        // Calculate with proper transfer direction
+        let totalIn = 0, totalOut = 0;
+        transData.forEach(t => {
+          if (t.type === 'deposit' || t.type === 'income') {
+            totalIn += t.amount;
+          } else if (t.type === 'withdraw' || t.type === 'expense') {
+            totalOut += t.amount;
+          } else if (t.type === 'transfer') {
+            const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+            const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+            if (isFromMill && !isToMill) {
+              // Mill -> Customer = Mill paid = Outflow
+              totalOut += t.amount;
+            } else if (!isFromMill && isToMill) {
+              // Customer -> Mill = Customer paid = Inflow
+              totalIn += t.amount;
+            }
+          }
+        });
+        
         const s = sales[0] || { sum: 0 };
         const lp = linkedPurchases[0] || { sum: 0 };
         
         // Final Balance = Base + Sales - Inflow + Outflow - Linked Purchases
-        balance = balance + s.sum - t.totalIn + t.totalOut - lp.sum;
+        balance = balance + s.sum - totalIn + totalOut - lp.sum;
 
       } else if (type === 'supplier') {
-        const [trans, purch] = await Promise.all([
-          Transaction.aggregate([
-            { $match: { ...matchBefore, supplierId: id } },
-            { $group: {
-              _id: null,
-              totalIn: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'deposit'] }, { $eq: ['$type', 'income'] }] }, '$amount', 0] } },
-              totalOut: { $sum: { $cond: [{ $or: [{ $eq: ['$type', 'withdraw'] }, { $eq: ['$type', 'transfer'] }, { $eq: ['$type', 'expense'] }] }, '$amount', 0] } },
-            }}
-          ]),
+        // Fetch transactions with account data for proper transfer direction detection
+        const [transData, purch] = await Promise.all([
+          Transaction.find({ ...matchBefore, supplierId: id })
+            .populate('fromAccountId', 'name isMillKhata isDailyKhata')
+            .populate('toAccountId', 'name isMillKhata isDailyKhata')
+            .lean(),
           StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }])
         ]);
-        const t = trans[0] || { totalIn: 0, totalOut: 0 };
-        balance += t.totalOut - t.totalIn - (purch[0]?.sum || 0);
+        
+        // Calculate with proper transfer direction
+        let totalIn = 0, totalOut = 0;
+        transData.forEach(t => {
+          if (t.type === 'deposit' || t.type === 'income') {
+            totalIn += t.amount;
+          } else if (t.type === 'withdraw' || t.type === 'expense') {
+            totalOut += t.amount;
+          } else if (t.type === 'transfer') {
+            const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+            const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+            if (isFromMill && !isToMill) {
+              // Mill -> Supplier = Mill paid = Outflow
+              totalOut += t.amount;
+            } else if (!isFromMill && isToMill) {
+              // Supplier -> Mill = Supplier paid = Inflow
+              totalIn += t.amount;
+            }
+          }
+        });
+        
+        balance += totalOut - totalIn - (purch[0]?.sum || 0);
 
       } else if (type === 'mazdoor') {
-        const trans = await Transaction.aggregate([
-          { $match: { ...matchBefore, mazdoorId: id } },
-          { $group: {
-            _id: null,
-            paid: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['withdraw', 'salary', 'transfer']] }] }, '$amount', 0] } },
-            earned: { $sum: { $cond: [{ $or: [{ $in: ['$type', ['deposit', 'income']] }, { $in: ['$category', ['salary_accrual', 'mazdoor_expense']] }] }, '$amount', 0] } }
-          }}
-        ]);
-        const t = trans[0] || { paid: 0, earned: 0 };
-        balance += t.earned - t.paid;
+        // Fetch transactions with account data for proper transfer direction detection
+        const transData = await Transaction.find({ ...matchBefore, mazdoorId: id })
+          .populate('fromAccountId', 'name isMillKhata isDailyKhata')
+          .populate('toAccountId', 'name isMillKhata isDailyKhata')
+          .lean();
+        
+        // Calculate with proper transfer direction
+        let paid = 0, earned = 0;
+        transData.forEach(t => {
+          if (t.category === 'salary_accrual' || t.category === 'mazdoor_expense' || t.type === 'deposit' || t.type === 'income') {
+            earned += t.amount;
+          } else if (t.type === 'withdraw' || t.type === 'salary') {
+            paid += t.amount;
+          } else if (t.type === 'transfer') {
+            const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+            const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+            if (isFromMill && !isToMill) {
+              // Mill -> Mazdoor = Mill paid wages = Paid
+              paid += t.amount;
+            } else if (!isFromMill && isToMill) {
+              // Mazdoor -> Mill = Mazdoor paid/returned = Earned context
+              earned += t.amount;
+            }
+          }
+        });
+        
+        balance += earned - paid;
 
       } else if (type === 'expense') {
         const tx = await Transaction.aggregate([{ $match: { ...matchBefore, expenseTypeId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]);
@@ -638,15 +690,33 @@ export const getConsolidatedLedgers = async (req, res) => {
         const tx = await Transaction.aggregate([{ $match: { ...matchBefore, category: 'mill_expense' } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]);
         balance += (tx[0]?.sum || 0);
       } else if (type === 'raw') {
-        const tx = await Transaction.aggregate([
-          { $match: { ...matchBefore, rawMaterialHeadId: id } },
-          { $group: {
-            _id: null,
-            sumIn: { $sum: { $cond: [{ $in: ['$type', ['deposit', 'sale', 'income']] }, '$amount', 0] } },
-            sumOut: { $sum: { $cond: [{ $in: ['$type', ['withdraw', 'salary', 'tax', 'expense', 'purchase']] }, '$amount', 0] } }
-          }}
-        ]);
-        balance += (tx[0]?.sumIn || 0) - (tx[0]?.sumOut || 0);
+        // Fetch transactions with account data for proper transfer direction detection
+        const transData = await Transaction.find({ ...matchBefore, rawMaterialHeadId: id })
+          .populate('fromAccountId', 'name isMillKhata isDailyKhata')
+          .populate('toAccountId', 'name isMillKhata isDailyKhata')
+          .lean();
+        
+        // Calculate with proper transfer direction
+        let sumIn = 0, sumOut = 0;
+        transData.forEach(t => {
+          if (t.type === 'deposit' || t.type === 'sale' || t.type === 'income') {
+            sumIn += t.amount;
+          } else if (t.type === 'withdraw' || t.type === 'salary' || t.type === 'tax' || t.type === 'expense' || t.type === 'purchase') {
+            sumOut += t.amount;
+          } else if (t.type === 'transfer') {
+            const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+            const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+            if (isFromMill && !isToMill) {
+              // Mill -> External = Stock Out
+              sumOut += t.amount;
+            } else if (!isFromMill && isToMill) {
+              // External -> Mill = Stock In
+              sumIn += t.amount;
+            }
+          }
+        });
+        
+        balance += sumIn - sumOut;
       } else if (type === 'account') {
         const tx = await Transaction.aggregate([
           { $match: { ...matchBefore, $or: [{ fromAccountId: id }, { toAccountId: id }] } },
@@ -689,11 +759,33 @@ export const getConsolidatedLedgers = async (req, res) => {
       
       trans.forEach(t => {
         // Customer Ledger Logic (Mill's Perspective on Customer Khata):
-        // Deposit/Income/Transfer = Customer paid mill = CREDIT (Jama - receivable reduced)
+        // Deposit/Income = Customer paid mill = CREDIT (Jama - receivable reduced)
         // Withdraw/Expense = Mill paid customer = DEBIT (Naam - receivable increased)
-        // This matches opening balance: balance = base + sales - totalIn(deposit+transfer+income) + totalOut(withdraw+expense)
-        const isCredit = t.type === 'deposit' || t.type === 'income' || t.type === 'transfer';
-        const isDebit = t.type === 'withdraw' || t.type === 'expense';
+        // Transfer: Direction matters!
+        //   - FROM mill TO customer = Debit (mill paid)
+        //   - FROM customer TO mill = Credit (customer paid)
+        
+        const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+        const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+        
+        let isCredit = t.type === 'deposit' || t.type === 'income';
+        let isDebit = t.type === 'withdraw' || t.type === 'expense';
+        
+        // Transfer direction detection
+        if (t.type === 'transfer') {
+          if (isFromMill && !isToMill) {
+            // Mill -> External (Customer) = Mill paid = Debit
+            isDebit = true;
+            isCredit = false;
+          } else if (!isFromMill && isToMill) {
+            // External (Customer) -> Mill = Customer paid = Credit
+            isCredit = true;
+            isDebit = false;
+          } else {
+            // Internal transfer - skip (shouldn't appear for customer)
+            return;
+          }
+        }
         
         const otherSide = isCredit ? (t.fromAccountId?.name || "Customer") : (t.toAccountId?.name || "Customer");
         const fallbackDesc = isCredit ? `Received from ${otherSide}` : `Paid to ${otherSide}`;
@@ -731,11 +823,33 @@ export const getConsolidatedLedgers = async (req, res) => {
       purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
       trans.forEach(t => {
         // Supplier Ledger Logic (Mill's Perspective on Supplier Khata):
-        // Withdraw/Expense/Transfer = Mill paid supplier = DEBIT (Naam - liability reduced)
+        // Withdraw/Expense = Mill paid supplier = DEBIT (Naam - liability reduced)
         // Deposit/Income = Supplier paid/returned to mill = CREDIT (Jama - liability context)
-        // This matches opening balance: balance = base + totalOut(withdraw+transfer+expense) - totalIn(deposit+income) - purchases
-        const isDebit = t.type === 'withdraw' || t.type === 'expense' || t.type === 'transfer';
-        const isCredit = t.type === 'deposit' || t.type === 'income';
+        // Transfer: Direction matters!
+        //   - FROM mill TO supplier = Debit (mill paid)
+        //   - FROM supplier TO mill = Credit (supplier paid)
+        
+        const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+        const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+        
+        let isDebit = t.type === 'withdraw' || t.type === 'expense';
+        let isCredit = t.type === 'deposit' || t.type === 'income';
+        
+        // Transfer direction detection
+        if (t.type === 'transfer') {
+          if (isFromMill && !isToMill) {
+            // Mill -> External (Supplier) = Mill paid = Debit
+            isDebit = true;
+            isCredit = false;
+          } else if (!isFromMill && isToMill) {
+            // External (Supplier) -> Mill = Supplier paid = Credit
+            isCredit = true;
+            isDebit = false;
+          } else {
+            // Internal transfer - skip (shouldn't appear for supplier)
+            return;
+          }
+        }
         
         const otherSide = isDebit ? (t.fromAccountId?.name || "Mill Account") : (t.toAccountId?.name || "Supplier");
         const fallbackDesc = isDebit ? `Payment via ${otherSide}` : `Received from ${otherSide}`;
@@ -761,13 +875,41 @@ export const getConsolidatedLedgers = async (req, res) => {
       const trans = activeTrans.filter(t => getId(t.mazdoorId) === mId);
       const ledger = [];
       trans.forEach(t => {
-        const isEarned = t.category === 'salary_accrual' || t.category === 'mazdoor_expense' || t.type === 'deposit' || t.type === 'income';
+        // Mazdoor Ledger Logic:
+        // Earned: salary_accrual, mazdoor_expense, deposit, income = CREDIT (work done)
+        // Paid: withdraw, salary = DEBIT (wages paid)
+        // Transfer: Direction matters!
+        //   - FROM mill TO mazdoor = Debit (mill paid wages)
+        //   - FROM mazdoor TO mill = Credit (mazdoor paid/returned)
+        
+        const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+        const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+        
+        let isEarned = t.category === 'salary_accrual' || t.category === 'mazdoor_expense' || t.type === 'deposit' || t.type === 'income';
+        let isPaid = t.type === 'withdraw' || t.type === 'salary';
+        
+        // Transfer direction detection
+        if (t.type === 'transfer') {
+          if (isFromMill && !isToMill) {
+            // Mill -> Mazdoor = Mill paid wages = Debit (Paid)
+            isPaid = true;
+            isEarned = false;
+          } else if (!isFromMill && isToMill) {
+            // Mazdoor -> Mill = Mazdoor paid/returned = Credit (Earned context)
+            isEarned = true;
+            isPaid = false;
+          } else {
+            // Internal transfer - skip
+            return;
+          }
+        }
+        
         const otherSide = t.fromAccountId?.name || t.toAccountId?.name || "Mill Cash";
         const fallbackDesc = isEarned ? (t.type === 'income' ? 'Ledger Adjustment' : 'Work Earned/Brought In') : `Paid via ${otherSide}`;
         ledger.push({ 
           date: t.date, 
           description: t.note || fallbackDesc, 
-          debit: !isEarned ? t.amount : 0, 
+          debit: isPaid ? t.amount : 0, 
           credit: isEarned ? t.amount : 0 
         });
       });
@@ -793,9 +935,39 @@ export const getConsolidatedLedgers = async (req, res) => {
       const op = await getEntityOpeningBalance('raw', party._id, 0);
       const trans = activeTrans.filter(t => getId(t.rawMaterialHeadId) === rwId);
       const ledger = trans.map(t => {
-        const isIn = t.type === 'deposit' || t.type === 'sale' || t.type === 'income';
-        return { date: t.date, description: t.note || (isIn ? 'Stock In' : 'Stock Out'), debit: !isIn ? t.amount : 0, credit: isIn ? t.amount : 0 };
-      });
+        // Raw Material Ledger Logic:
+        // Stock In: deposit, sale, income = CREDIT (material received)
+        // Stock Out: withdraw, salary, tax, expense, purchase = DEBIT (material used/sold)
+        // Transfer: Direction matters!
+        //   - FROM mill/external TO raw material = Credit (Stock In)
+        //   - FROM raw material TO mill/external = Debit (Stock Out)
+        
+        const isFromMill = t.fromAccountId?.isMillKhata || t.fromAccountId?.isDailyKhata;
+        const isToMill = t.toAccountId?.isMillKhata || t.toAccountId?.isDailyKhata;
+        
+        let isIn = t.type === 'deposit' || t.type === 'sale' || t.type === 'income';
+        let isOut = t.type === 'withdraw' || t.type === 'salary' || t.type === 'tax' || t.type === 'expense' || t.type === 'purchase';
+        
+        // Transfer direction detection
+        if (t.type === 'transfer') {
+          if (isFromMill && !isToMill) {
+            // Mill -> External = Stock Out = Debit
+            isOut = true;
+            isIn = false;
+          } else if (!isFromMill && isToMill) {
+            // External -> Mill = Stock In = Credit
+            isIn = true;
+            isOut = false;
+          } else {
+            // Internal transfer - skip
+            return null;
+          }
+        }
+        
+        if (!isIn && !isOut) return null; // Skip if neither
+        
+        return { date: t.date, description: t.note || (isIn ? 'Stock In' : 'Stock Out'), debit: isOut ? t.amount : 0, credit: isIn ? t.amount : 0 };
+      }).filter(Boolean); // Remove null entries
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
       consolidatedData.rawMaterials.push({ name: party.name, openingBalance: op, ledger });
     }
@@ -876,15 +1048,52 @@ export const getConsolidatedLedgers = async (req, res) => {
       const itemPurchases = activePurchases.filter(p => (p.items || []).some(item => getId(item.itemId) === iId));
 
       const ledger = [];
+      
+      // Add Opening Balance entry if exists
+      if (op !== 0) {
+        ledger.push({
+          date: fromDate,
+          description: 'Opening Balance (Previous Period Stock Value)',
+          debit: op > 0 ? op : 0,
+          credit: op < 0 ? Math.abs(op) : 0,
+          status: 'opening',
+          bags: 0,
+          weight: 0,
+          isOpeningBalance: true
+        });
+      }
+      
       itemSales.forEach(s => {
-         const match = s.items.find(it => getId(it.itemId) === iId);
+         // Get ALL matching lines for this item (same item can appear multiple times in one sale)
+         const matches = (s.items || []).filter(it => getId(it.itemId) === iId);
          const custName = s.customerId?.name || allCustomers.find(c => c._id.toString() === getId(s.customerId))?.name || "Customer";
-         ledger.push({ date: s.date, description: `Sale to ${custName} (Truck: ${s.truckNumber || '-'})`, debit: match.totalAmount, credit: 0, status: 'sold', bags: match.kattay || 0, weight: match.quantity || 0 });
+         matches.forEach((match, idx) => {
+           ledger.push({ 
+             date: s.date, 
+             description: `Sale to ${custName} (Truck: ${s.truckNumber || '-'})${matches.length > 1 ? ` [Line ${idx + 1}]` : ''}`, 
+             debit: match.totalAmount, 
+             credit: 0, 
+             status: 'sold', 
+             bags: match.kattay || 0, 
+             weight: match.quantity || 0 
+           });
+         });
       });
       itemPurchases.forEach(p => {
-         const match = p.items.find(it => getId(it.itemId) === iId);
+         // Get ALL matching lines for this item (same item can appear multiple times in one purchase)
+         const matches = (p.items || []).filter(it => getId(it.itemId) === iId);
          const supName = p.supplierId?.name || allSuppliers.find(sup => sup._id.toString() === getId(p.supplierId))?.name || "Supplier";
-         ledger.push({ date: p.date, description: `Purchase from ${supName} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: match.amount, status: 'purchased', bags: match.kattay || 0, weight: match.quantity || match.receivedWeight || 0 });
+         matches.forEach((match, idx) => {
+           ledger.push({ 
+             date: p.date, 
+             description: `Purchase from ${supName} (Truck: ${p.truckNumber || '-'})${matches.length > 1 ? ` [Line ${idx + 1}]` : ''}`, 
+             debit: 0, 
+             credit: match.amount, 
+             status: 'purchased', 
+             bags: match.kattay || 0, 
+             weight: match.quantity || match.receivedWeight || 0 
+           });
+         });
       });
 
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
