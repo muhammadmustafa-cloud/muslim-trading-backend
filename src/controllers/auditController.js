@@ -704,33 +704,21 @@ export const getConsolidatedLedgers = async (req, res) => {
       linkedPurchases.forEach(p => ledger.push({ date: p.date, description: `Purchase Invoice (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
       
       trans.forEach(t => {
-        // Customer Ledger Logic:
-        // Deposit = Customer paid to mill = CREDIT (Aamad - mill ko paise aaye)
-        // Withdraw = Mill paid to customer = DEBIT (Kharch - mill se paise gaye)
-        // Income = Mill received from customer = CREDIT (Aamad)
-        // Transfer = depends on direction
-        const isCredit = t.type === 'deposit' || t.type === 'income';
+        // Customer Ledger Logic (Mill's Perspective on Customer Khata):
+        // Deposit/Income/Transfer = Customer paid mill = CREDIT (Jama - receivable reduced)
+        // Withdraw/Expense = Mill paid customer = DEBIT (Naam - receivable increased)
+        // This matches opening balance: balance = base + sales - totalIn(deposit+transfer+income) + totalOut(withdraw+expense)
+        const isCredit = t.type === 'deposit' || t.type === 'income' || t.type === 'transfer';
         const isDebit = t.type === 'withdraw' || t.type === 'expense';
         
-        // For transfers, we need to check direction
-        let transferDirection = null;
-        if (t.type === 'transfer') {
-          // If money is coming TO mill account from customer = Credit
-          // If money is going FROM mill account to customer = Debit
-          transferDirection = 'neutral'; // Default to neutral for safety
-        }
-        
-        const finalCredit = isCredit || (t.type === 'transfer' && transferDirection === 'credit');
-        const finalDebit = isDebit || (t.type === 'transfer' && transferDirection === 'debit');
-        
-        const otherSide = finalCredit ? (t.fromAccountId?.name || "Customer") : (t.toAccountId?.name || "Customer");
-        const fallbackDesc = finalCredit ? `Received from ${otherSide}` : `Paid to ${otherSide}`;
+        const otherSide = isCredit ? (t.fromAccountId?.name || "Customer") : (t.toAccountId?.name || "Customer");
+        const fallbackDesc = isCredit ? `Received from ${otherSide}` : `Paid to ${otherSide}`;
         
         ledger.push({
           date: t.date,
           description: t.note || fallbackDesc,
-          debit: finalDebit ? t.amount : 0,
-          credit: finalCredit ? t.amount : 0,
+          debit: isDebit ? t.amount : 0,
+          credit: isCredit ? t.amount : 0,
           bags: 0
         });
       });
@@ -758,31 +746,21 @@ export const getConsolidatedLedgers = async (req, res) => {
       const ledger = [];
       purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
       trans.forEach(t => {
-        // Supplier Ledger Logic:
-        // Withdraw = Mill paid to supplier = CREDIT (Aamad - supplier ko paise aaye)
-        // Deposit = Supplier paid to mill = DEBIT (Kharch - supplier se paise gaye)
-        // Expense = Mill expense paid to supplier = CREDIT (Aamad)
-        // Transfer = depends on direction
-        const isCredit = t.type === 'withdraw' || t.type === 'expense';
-        const isDebit = t.type === 'deposit';
+        // Supplier Ledger Logic (Mill's Perspective on Supplier Khata):
+        // Withdraw/Expense/Transfer = Mill paid supplier = DEBIT (Naam - liability reduced)
+        // Deposit/Income = Supplier paid/returned to mill = CREDIT (Jama - liability context)
+        // This matches opening balance: balance = base + totalOut(withdraw+transfer+expense) - totalIn(deposit+income) - purchases
+        const isDebit = t.type === 'withdraw' || t.type === 'expense' || t.type === 'transfer';
+        const isCredit = t.type === 'deposit' || t.type === 'income';
         
-        // For transfers, we need to check direction
-        let transferDirection = null;
-        if (t.type === 'transfer') {
-          transferDirection = 'neutral'; // Default to neutral for safety
-        }
-        
-        const finalCredit = isCredit || (t.type === 'transfer' && transferDirection === 'credit');
-        const finalDebit = isDebit || (t.type === 'transfer' && transferDirection === 'debit');
-        
-        const otherSide = finalCredit ? (t.toAccountId?.name || "Supplier") : (t.fromAccountId?.name || "Supplier");
-        const fallbackDesc = finalCredit ? `Paid to ${otherSide}` : `Received from ${otherSide}`;
+        const otherSide = isDebit ? (t.fromAccountId?.name || "Mill Account") : (t.toAccountId?.name || "Supplier");
+        const fallbackDesc = isDebit ? `Payment via ${otherSide}` : `Received from ${otherSide}`;
         
         ledger.push({
           date: t.date,
           description: t.note || fallbackDesc,
-          debit: finalDebit ? t.amount : 0,
-          credit: finalCredit ? t.amount : 0,
+          debit: isDebit ? t.amount : 0,
+          credit: isCredit ? t.amount : 0,
           bags: 0
         });
       });
@@ -881,7 +859,11 @@ export const getConsolidatedLedgers = async (req, res) => {
       const op = await getEntityOpeningBalance('account', party._id, party.openingBalance);
       const trans = activeTrans.filter(t => getId(t.fromAccountId) === aId || getId(t.toAccountId) === aId);
       const ledger = trans.map(t => {
-        // Broad inflow logic: if it's arriving at this account, it's a Credit (Aamad)
+        // Account Ledger Logic (Asset Account Convention):
+        // Money IN (toAccount matches) = DEBIT (asset increases)
+        // Money OUT (fromAccount matches) = CREDIT (asset decreases)
+        // This matches opening balance: balance = base + totalIn - totalOut
+        // And display: runningBalance += (debit - credit) = += (incoming - outgoing)
         const isIn = getId(t.toAccountId) === aId;
         
         // Find the "other party" involved (Customer, Supplier, etc.)
@@ -891,8 +873,8 @@ export const getConsolidatedLedgers = async (req, res) => {
         return { 
           date: t.date, 
           description: (t.note || fallbackDesc) + ` [${t.type.toUpperCase()}]`, 
-          debit: isIn ? 0 : t.amount, 
-          credit: isIn ? t.amount : 0 
+          debit: isIn ? t.amount : 0, 
+          credit: isIn ? 0 : t.amount 
         };
       });
       ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
