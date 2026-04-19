@@ -19,7 +19,6 @@ function dateFilter(dateFrom, dateTo) {
  */
 export const getDailyMemo = async (req, res) => {
   const { Transaction, Account, Customer, Supplier, Mazdoor, DailyDastiEntry } = req.models;
-  console.log("API HIT: getDailyMemo");
   const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -62,74 +61,81 @@ export const getDailyMemo = async (req, res) => {
     baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
   }
 
-  // 2. Calculate Historical Cash Flow
-  // We determine what entered/left the "Mill Box" before today.
-  const prevTransactions = await Transaction.aggregate([
-    { $match: prevMatch },
-    {
-      $group: {
-        _id: null,
-        totalIn: {
-          $sum: {
-            $cond: [
-              {
-                $or: [
-                  // Case A: Specific Account selected + Source=Credit logic
-                  { $and: [!!accountId, { $ne: ["$type", "transfer"] }, { $eq: ["$toAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  { $and: [!!accountId, { $eq: ["$type", "transfer"] }, { $eq: ["$fromAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  // Case B: Full Mill Summary + money entered ANY Mill Account
-                  // (Internal transfers cancel out; external toAccount handled separately)
-                  { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ["$toAccountId", millAccObjectIdIds] }] },
-                  // Case C: Party ledgers
-                  { $and: [!!customerId, { $eq: ["$type", "deposit"] }] },
-                  { $and: [!!supplierId, { $eq: ["$type", "deposit"] }] },
-                  { $and: [!!mazdoorId, { $eq: ["$category", "salary_accrual"] }] },
-                  /**
-                   * Case D: ALL Transfers INTO Mill Accounts → Count in Credit (totalIn)
-                   * This handles: External→Mill, Mill→Mill transfers
-                   * Mill→External is handled in totalOut, creating net-zero effect for internal transfers
-                   * and proper accounting for external transfers.
-                   */
-                  {
-                    $and: [
-                      !accountId && !customerId && !supplierId && !mazdoorId, // Full Mill view only
-                      { $eq: ["$type", "transfer"] },
-                      { $in: ["$toAccountId", millAccObjectIdIds] }        // ANY transfer TO mill account
-                    ]
-                  },
-                ],
-              },
-              "$amount",
-              0,
-            ],
-          },
-        },
-        totalOut: {
-          $sum: {
-            $cond: [
-              {
-                $or: [
-                  // Case A: Specific Account selected + Destination=Debit logic
-                  { $and: [!!accountId, { $ne: ["$type", "transfer"] }, { $eq: ["$fromAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  { $and: [!!accountId, { $eq: ["$type", "transfer"] }, { $eq: ["$toAccountId", new mongoose.Types.ObjectId(accountId)] }] },
-                  // Case B: Full Mill Summary + money left ANY Mill Account
-                  { $and: [!accountId, !customerId && !supplierId && !mazdoorId, { $in: ["$fromAccountId", millAccObjectIdIds] }] },
-                  // Case C: Party ledgers
-                  { $and: [!!customerId, { $eq: ["$type", "withdraw"] }] },
-                  { $and: [!!supplierId, { $eq: ["$type", "withdraw"] }] },
-                  { $and: [!!mazdoorId, { $in: ["$type", ["withdraw", "salary"]] }] },
-                ],
-              },
-              "$amount",
-              0,
-            ],
-          },
-        },
-      },
-    },
-  ]);
+  // 2. Calculate Historical Cash Flow - SIMPLIFIED APPROACH
+  // Fetch all transactions before the date range and calculate running balance
+  const prevTransactionsList = await Transaction.find(prevMatch)
+    .populate("fromAccountId", "isDailyKhata isMillKhata")
+    .populate("toAccountId", "isDailyKhata isMillKhata")
+    .lean();
 
-  const openingBalance = baseOpeningBalance + (prevTransactions.length > 0 ? prevTransactions[0].totalIn - prevTransactions[0].totalOut : 0);
+  let historicalNetChange = 0;
+  
+  // DEBUG: Log the number of previous transactions
+  console.log(`[DEBUG] prevTransactionsList count: ${prevTransactionsList.length}`);
+  console.log(`[DEBUG] fromDate: ${fromDate}`);
+  
+  prevTransactionsList.forEach(t => {
+    const fromIsMill = t.fromAccountId?.isDailyKhata || t.fromAccountId?.isMillKhata;
+    const toIsMill = t.toAccountId?.isDailyKhata || t.toAccountId?.isMillKhata;
+    
+    if (accountId) {
+      // Specific account view
+      const accObjId = accountId.toString();
+      const fromId = t.fromAccountId?._id?.toString();
+      const toId = t.toAccountId?._id?.toString();
+      
+      if (t.type === 'transfer') {
+        // For transfers: money ARRIVING at account = +ve, LEAVING = -ve
+        if (fromId === accObjId) historicalNetChange -= t.amount; // Money left
+        if (toId === accObjId) historicalNetChange += t.amount;   // Money arrived
+      } else {
+        // For deposits/withdrawals
+        if (t.type === 'deposit' && toId === accObjId) historicalNetChange += t.amount;
+        if ((t.type === 'withdraw' || t.category === 'expense') && fromId === accObjId) historicalNetChange -= t.amount;
+      }
+    } else if (customerId) {
+      // Customer ledger: deposits increase balance, withdraws decrease
+      if (t.type === 'deposit') historicalNetChange += t.amount;
+      if (t.type === 'withdraw') historicalNetChange -= t.amount;
+    } else if (supplierId) {
+      // Supplier ledger: deposits increase balance, withdraws decrease
+      if (t.type === 'deposit') historicalNetChange += t.amount;
+      if (t.type === 'withdraw') historicalNetChange -= t.amount;
+    } else if (mazdoorId) {
+      // Mazdoor ledger
+      if (t.category === 'salary_accrual') historicalNetChange += t.amount;
+      if (t.type === 'withdraw' || t.type === 'salary') historicalNetChange -= t.amount;
+    } else {
+      // Full Mill Summary - Only count EXTERNAL flows (ignore internal transfers between mill accounts)
+      const isInternalTransfer = t.type === 'transfer' && fromIsMill && toIsMill;
+      
+      if (!isInternalTransfer) {
+        // Money leaving mill accounts (expense, salary, withdraw)
+        if (fromIsMill) {
+          historicalNetChange -= t.amount;
+          if (t.amount === 10000) {
+            console.log(`[DEBUG] Subtracting 10000 from historicalNetChange (fromIsMill). Transaction: ${t.type}, ${t.amount}, from: ${t.fromAccountId?.name}, fromIsMill: ${fromIsMill}`);
+          }
+        }
+        // Money entering mill accounts (deposits)
+        // BUT NOT for salary/expense transactions - those are money LEAVING, not arriving
+        if (toIsMill && t.type !== 'salary' && t.category !== 'expense') {
+          historicalNetChange += t.amount;
+          if (t.amount === 10000) {
+            console.log(`[DEBUG] Adding 10000 to historicalNetChange (toIsMill). Transaction: ${t.type}, ${t.amount}, to: ${t.toAccountId?.name}`);
+          }
+        }
+      }
+      // Internal transfers net to zero (both + and - cancel out)
+    }
+  });
+
+  console.log(`[DEBUG] baseOpeningBalance: ${baseOpeningBalance}`);
+  console.log(`[DEBUG] historicalNetChange: ${historicalNetChange}`);
+  
+  const openingBalance = baseOpeningBalance + historicalNetChange;
+  
+  console.log(`[DEBUG] calculated openingBalance: ${openingBalance}`);
 
   const currMatch = {
     date: { $gte: fromDate, $lte: toDate },
@@ -168,31 +174,6 @@ export const getDailyMemo = async (req, res) => {
     .populate("rawMaterialHeadId", "name")
     .sort({ date: 1, createdAt: 1 })
     .lean();
-
-    console.log("TOTAL TRANSACTIONS:", transactions.length);
-
-// 👇 OPTIONAL (DETAIL CHECK)
-transactions.forEach(t => {
-  console.log("DATE:", formatDateOnly(t.date), "AMOUNT:", t.amount);
-});
-
-  const debug = await Transaction.find(currMatch).lean();
-
-  console.log("===== DEBUG START =====");
-
-  debug.forEach((t) => {
-    console.log({
-      id: t._id.toString().slice(-6),
-      date: formatDateOnly(t.date),
-      amount: t.amount,
-      type: t.type,
-      category: t.category,
-      from: t.fromAccountId,
-      to: t.toAccountId,
-    });
-  });
-
-  console.log("===== DEBUG END =====");
 
   const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
   const isInternalTransfer = (t) => t.type === "transfer" && isOperationalAccount(t.fromAccountId) && isOperationalAccount(t.toAccountId);
@@ -337,11 +318,32 @@ transactions.forEach(t => {
         });
       } else {
         // Internal standard account-to-account transfers
+        // BUSINESS RULE: fromAccount = CREDIT (in), toAccount = DEBIT (out)
         if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({ type: "transfer_out", date: formatDateOnly(t.date), name: t.fromAccountId?.name || "Account", description: `Transfer to ${t.toAccountId?.name || "—"}`, accountName: t.fromAccountId?.name || "Manual", amount: t.amount, amountType: "in", isExternal, referenceId: t._id });
+          rows.push({ 
+            type: "transfer_out", 
+            date: formatDateOnly(t.date), 
+            name: t.fromAccountId?.name || "Account", 
+            description: `Transfer to ${t.toAccountId?.name || "—"}`, 
+            accountName: t.fromAccountId?.name || "Manual", 
+            amount: t.amount, 
+            amountType: "in", // fromAccount = CREDIT (in) per business rule
+            isExternal, 
+            referenceId: t._id 
+          });
         }
         if (t.toAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({ type: "transfer_in", date: formatDateOnly(t.date), name: t.toAccountId?.name || "Account", description: `Transfer from ${t.fromAccountId?.name || "—"}`, accountName: t.toAccountId?.name || "Manual", amount: t.amount, amountType: "out", isExternal, referenceId: t._id });
+          rows.push({ 
+            type: "transfer_in", 
+            date: formatDateOnly(t.date), 
+            name: t.toAccountId?.name || "Account", 
+            description: `Transfer from ${t.fromAccountId?.name || "—"}`, 
+            accountName: t.toAccountId?.name || "Manual", 
+            amount: t.amount, 
+            amountType: "out", // toAccount = DEBIT (out) per business rule
+            isExternal, 
+            referenceId: t._id 
+          });
         }
       }
     }
