@@ -480,6 +480,12 @@ export const getConsolidatedLedgers = async (req, res) => {
 
     const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
 
+    // DEBUG: Log date range and check for 2026-04-09
+    const isTargetDate = fromDateStr === '2026-04-09' || toDateStr === '2026-04-09';
+    if (isTargetDate) {
+      console.log('[DEBUG 2026-04-09] fromDate:', fromDate, 'toDate:', toDate);
+      console.log('[DEBUG 2026-04-09] fromDateStr:', fromDateStr, 'toDateStr:', toDateStr);
+    }
 
     // 1. Identify all active entities in this range
     const [
@@ -520,6 +526,23 @@ export const getConsolidatedLedgers = async (req, res) => {
       MillExpense.find({}).lean()
     ]);
 
+    // DEBUG: Log transactions found for 2026-04-09
+    if (isTargetDate) {
+      console.log('[DEBUG 2026-04-09] activeTrans count:', activeTrans.length);
+      console.log('[DEBUG 2026-04-09] activeSales count:', activeSales.length);
+      console.log('[DEBUG 2026-04-09] activePurchases count:', activePurchases.length);
+      
+      // Log customer transactions specifically
+      const custTrans = activeTrans.filter(t => t.customerId);
+      console.log('[DEBUG 2026-04-09] customer transactions:', custTrans.map(t => ({
+        id: t._id.toString().slice(-6),
+        type: t.type,
+        amount: t.amount,
+        customer: t.customerId?.name || t.customerId?._id?.toString().slice(-6),
+        from: t.fromAccountId?.name,
+        to: t.toAccountId?.name
+      })));
+    }
 
     // Helper: Calculation of individual entity's ID
     const getId = (ref) => ref?._id?.toString() || ref?.toString() || null;
@@ -728,12 +751,8 @@ export const getConsolidatedLedgers = async (req, res) => {
         ]);
         balance += (tx[0]?.totalIn || 0) - (tx[0]?.totalOut || 0);
       } else if (type === 'item') {
-        const itemObjId = new mongoose.Types.ObjectId(id);
-        const [sales, purchases] = await Promise.all([
-          Sale.aggregate([{ $match: matchBefore }, { $unwind: '$items' }, { $match: { 'items.itemId': itemObjId } }, { $group: { _id: null, sum: { $sum: '$items.totalAmount' } } }]),
-          StockEntry.aggregate([{ $match: matchBefore }, { $unwind: '$items' }, { $match: { 'items.itemId': itemObjId } }, { $group: { _id: null, sum: { $sum: '$items.amount' } } }])
-        ]);
-        balance += (sales[0]?.sum || 0) - (purchases[0]?.sum || 0);
+        // Items don't have opening balance - they track period turnover only
+        // Opening balance stays as passed (0)
       }
       return balance;
     };
@@ -781,8 +800,13 @@ export const getConsolidatedLedgers = async (req, res) => {
             // External (Customer) -> Mill = Customer paid = Credit
             isCredit = true;
             isDebit = false;
+          } else if (!isFromMill && !isToMill && t.customerId) {
+            // External -> External but linked to customer = SHOW IT
+            // Customer received money (Bank -> Customer = Credit for customer)
+            isCredit = true;
+            isDebit = false;
           } else {
-            // Internal transfer - skip (shouldn't appear for customer)
+            // Internal transfer - skip
             return;
           }
         }
@@ -1042,26 +1066,14 @@ export const getConsolidatedLedgers = async (req, res) => {
     for (const iId of activeItemIds) {
       const party = allItems.find(i => i._id.toString() === iId);
       if (!party) continue;
-      const op = await getEntityOpeningBalance('item', party._id, 0); // No real opening monetory val for item usually, just turnover
+      // Items don't have opening balance - they just track turnover (sales/purchases)
+      const op = 0;
       
       const itemSales = activeSales.filter(s => (s.items || []).some(item => getId(item.itemId) === iId));
       const itemPurchases = activePurchases.filter(p => (p.items || []).some(item => getId(item.itemId) === iId));
 
       const ledger = [];
-      
-      // Add Opening Balance entry if exists
-      if (op !== 0) {
-        ledger.push({
-          date: fromDate,
-          description: 'Opening Balance (Previous Period Stock Value)',
-          debit: op > 0 ? op : 0,
-          credit: op < 0 ? Math.abs(op) : 0,
-          status: 'opening',
-          bags: 0,
-          weight: 0,
-          isOpeningBalance: true
-        });
-      }
+      // No opening balance for items - only transactions
       
       itemSales.forEach(s => {
          // Get ALL matching lines for this item (same item can appear multiple times in one sale)
