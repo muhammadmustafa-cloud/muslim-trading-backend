@@ -242,7 +242,7 @@ export const getHistory = async (req, res) => {
     success: true,
     data: {
       name: supplier.name,
-      ledger: ledger.reverse(),
+      ledger: ledger, // Show oldest first (ascending)
       summary: {
         totalDebit: ledger.reduce((sum, i) => sum + i.debit, 0),
         totalCredit: ledger.reduce((sum, i) => sum + i.credit, 0),
