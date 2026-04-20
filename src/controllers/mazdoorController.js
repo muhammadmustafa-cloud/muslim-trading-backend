@@ -76,7 +76,7 @@ export const getHistory = async (req, res) => {
   const transactions = await Transaction.find({ mazdoorId: mId, ...dateFilter })
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
-    .sort({ date: -1 })
+    .sort({ date: 1 }) // Oldest first (ascending)
     .limit(1000)
     .lean();
   
