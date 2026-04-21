@@ -8,7 +8,7 @@ export const getAuditSummary = async (req, res) => {
     const { 
       Account, Customer, Supplier, Mazdoor, 
       MachineryPurchase, Transaction, Item, 
-      RawMaterialHead, Sale, StockEntry 
+      RawMaterialHead, Sale, StockEntry, DailyDastiEntry
     } = req.models;
 
     const { dateFrom, dateTo } = req.query;
@@ -102,7 +102,31 @@ export const getAuditSummary = async (req, res) => {
         }
       }
     ]);
-    const openingBalance = baseOpeningBalance + (prevTransactions.length > 0 ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) : 0);
+    // Calculate Dasti entries effect before fromDate (for opening balance)
+    const prevDastiAgg = await DailyDastiEntry.aggregate([
+      { $match: { date: { $lt: opBalBoundary } } },
+      {
+        $group: {
+          _id: null,
+          totalCredit: { $sum: { $cond: [{ $eq: ['$type', 'credit'] }, '$amount', 0] } },
+          totalDebit: { $sum: { $cond: [{ $eq: ['$type', 'debit'] }, '$amount', 0] } }
+        }
+      }
+    ]);
+    const prevDastiEffect = prevDastiAgg.length > 0 ? (prevDastiAgg[0].totalCredit - prevDastiAgg[0].totalDebit) : 0;
+
+    const prevTxCalc = prevTransactions.length > 0 ? (prevTransactions[0].totalIn - prevTransactions[0].totalOut) : 0;
+    const openingBalance = baseOpeningBalance + prevTxCalc + prevDastiEffect;
+
+    console.log('=== AUDIT OPENING BALANCE DEBUG ===');
+    console.log('Date range:', fromDate, 'to', toDate);
+    console.log('Base opening balance (from accounts):', baseOpeningBalance);
+    console.log('Mill account IDs:', millAccIdStrings);
+    console.log('Previous transactions aggregation:', prevTransactions);
+    console.log('Prev Tx calculation (totalIn - totalOut):', prevTxCalc);
+    console.log('Prev Dasti entries effect (credit - debit):', prevDastiEffect);
+    console.log('Final openingBalance:', openingBalance);
+    console.log('=====================================');
 
     // 1. Bank & Cash Account Details (Periodic Activity Sync)
     // We aggregate ALL accounts in one pass for precision and dashboard alignment
@@ -440,7 +464,28 @@ export const getAuditSummary = async (req, res) => {
         }
       }
     ]);
-    const universalBaqaya = baseOpeningBalance + (allTimeAgg.length > 0 ? (allTimeAgg[0].totalAllTimeIn - allTimeAgg[0].totalAllTimeOut) : 0);
+    // Calculate Dasti entries effect up to toDate (for universal baqaya)
+    const allTimeDastiAgg = await DailyDastiEntry.aggregate([
+      { $match: { date: { $lte: toDate } } },
+      {
+        $group: {
+          _id: null,
+          totalCredit: { $sum: { $cond: [{ $eq: ['$type', 'credit'] }, '$amount', 0] } },
+          totalDebit: { $sum: { $cond: [{ $eq: ['$type', 'debit'] }, '$amount', 0] } }
+        }
+      }
+    ]);
+    const allTimeDastiEffect = allTimeDastiAgg.length > 0 ? (allTimeDastiAgg[0].totalCredit - allTimeDastiAgg[0].totalDebit) : 0;
+
+    const universalBaqaya = baseOpeningBalance + 
+      (allTimeAgg.length > 0 ? (allTimeAgg[0].totalAllTimeIn - allTimeAgg[0].totalAllTimeOut) : 0) + 
+      allTimeDastiEffect;
+
+    console.log('=== AUDIT UNIVERSAL BAQAYA DEBUG ===');
+    console.log('All-time transactions (In - Out):', allTimeAgg.length > 0 ? (allTimeAgg[0].totalAllTimeIn - allTimeAgg[0].totalAllTimeOut) : 0);
+    console.log('All-time Dasti effect (credit - debit):', allTimeDastiEffect);
+    console.log('Final universalBaqaya:', universalBaqaya);
+    console.log('=====================================');
 
     res.json({
       success: true,
