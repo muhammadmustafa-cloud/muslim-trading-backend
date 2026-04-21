@@ -171,12 +171,18 @@ export const getHistory = async (req, res) => {
       ? e.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
       : (e.kattay || 0);
 
+    // Fix: Calculate from items to get correct amount without double-counting
+    // item.amount already includes distributed bardana/mazdori/extras
+    const calculatedAmount = (e.items && e.items.length > 0)
+      ? e.items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
+      : Number(e.amount) || 0;
+
     ledger.push({
       date: e.date,
       description: `Purchase: ${itemNames} (Truck: ${e.truckNumber || 'N/A'})`,
       bags: totalBags,
       debit: 0,
-      credit: e.amount || 0,
+      credit: calculatedAmount,
       type: 'purchase',
       refId: e._id
     });
