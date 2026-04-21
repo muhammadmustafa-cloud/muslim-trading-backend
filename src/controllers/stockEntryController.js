@@ -132,8 +132,9 @@ export const create = async (req, res) => {
     };
   });
 
-  const parsedExtras = Number(extras) || 0;
-  const finalTotalAmount = Math.max(0, grandTotalAmount + (Number(totalBardanaAmount) || 0) + (Number(totalMazdori) || 0) - parsedExtras);
+  // NOTE: grandTotalAmount already includes per-item distributed bardana/mazdori/extras
+  // Do NOT add totalBardanaAmount/totalMazdori again - that would double count
+  const finalTotalAmount = Math.max(0, grandTotalAmount);
 
   const paid = Number(amountPaid) || 0;
   let status = 'pending';
@@ -304,9 +305,11 @@ export const update = async (req, res) => {
 
   if (extras !== undefined) entry.extras = Number(extras) || 0;
 
-  // Recalculate true total amount factoring in extras, bardana, and mazdori
+  // Recalculate true total amount from items
+  // NOTE: item.amount already includes distributed bardana/mazdori/extras
+  // Do NOT add totalBardanaAmount/totalMazdori again - that would double count
   const currentGrandTotal = entry.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  entry.amount = Math.max(0, currentGrandTotal + (entry.totalBardanaAmount || 0) + (entry.totalMazdori || 0) - (entry.extras || 0));
+  entry.amount = Math.max(0, currentGrandTotal);
 
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
 
