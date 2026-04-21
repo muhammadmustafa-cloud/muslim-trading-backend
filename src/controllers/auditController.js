@@ -336,13 +336,16 @@ export const getAuditSummary = async (req, res) => {
     const detailedItems = allItems.map(item => {
       const p = itemPurchaseAgg.find(x => x._id?.toString() === item._id.toString()) || { totalPurchase: 0 };
       const s = itemSaleAgg.find(x => x._id?.toString() === item._id.toString()) || { totalSale: 0 };
+      const saleVolume = s.totalSale || 0;
+      const purchaseVolume = p.totalPurchase || 0;
       return {
         _id: item._id,
         name: item.name,
-        purchaseVolume: p.totalPurchase,
-        saleVolume: s.totalSale
+        purchaseVolume,
+        saleVolume,
+        baqaya: saleVolume - purchaseVolume
       };
-    }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0);
+    }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0 || i.baqaya !== 0);
     
     // 6.b Raw Material Heads Activity Aggregations
     const rawMaterialActivity = await Transaction.aggregate([
