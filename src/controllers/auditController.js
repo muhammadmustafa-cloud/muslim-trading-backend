@@ -84,7 +84,12 @@ export const getAuditSummary = async (req, res) => {
           totalIn: {
             $sum: {
               $cond: [
-                { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
+                { 
+                  $and: [
+                    { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
+                    { $not: { $in: ['$type', ['salary', 'expense']] } } // Exclude salary/expense (matches Daily Memo logic)
+                  ]
+                },
                 '$amount',
                 0
               ]
@@ -422,7 +427,12 @@ export const getAuditSummary = async (req, res) => {
           totalAllTimeIn: {
             $sum: {
               $cond: [
-                { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
+                { 
+                  $and: [
+                    { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
+                    { $not: { $in: ['$type', ['salary', 'expense']] } } // Exclude salary/expense (matches Daily Memo logic)
+                  ]
+                },
                 '$amount',
                 0
               ]
