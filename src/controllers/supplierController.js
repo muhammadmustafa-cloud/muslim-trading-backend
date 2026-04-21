@@ -262,11 +262,14 @@ export const getHistory = async (req, res) => {
 export const getPayables = async (req, res) => {
   const { StockEntry } = req.models;
   const payables = await StockEntry.aggregate([
-    { $match: { paymentStatus: { $ne: 'paid' }, amount: { $gt: 0 } } },
+    { $match: { paymentStatus: { $ne: 'paid' } } },
+    // Fix: Calculate amount from items to avoid double-counting
+    { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+    { $match: { calculatedAmount: { $gt: 0 } } },
     {
       $group: {
         _id: '$supplierId',
-        totalBillAmount: { $sum: '$amount' },
+        totalBillAmount: { $sum: '$calculatedAmount' },
         totalPaidAmount: { $sum: '$amountPaid' },
         pendingBillsCount: { $sum: 1 },
         bills: {
@@ -274,7 +277,7 @@ export const getPayables = async (req, res) => {
             _id: '$_id',
             date: '$date',
             items: '$items',
-            amount: '$amount',
+            amount: '$calculatedAmount', // Use calculated amount
             amountPaid: '$amountPaid',
             dueDate: '$dueDate',
             paymentStatus: '$paymentStatus',

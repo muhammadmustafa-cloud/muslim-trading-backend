@@ -232,7 +232,8 @@ export const getAuditSummary = async (req, res) => {
     ]);
     const supplierPurchases = await StockEntry.aggregate([
       { $match: snapshotMatch },
-      { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
+      { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+      { $group: { _id: '$supplierId', total: { $sum: '$calculatedAmount' } } }
     ]);
 
     const periodSupplierTrans = await Transaction.aggregate([
@@ -245,7 +246,8 @@ export const getAuditSummary = async (req, res) => {
     ]);
     const periodSupplierPurchases = await StockEntry.aggregate([
       { $match: periodMatch },
-      { $group: { _id: '$supplierId', total: { $sum: '$amount' } } }
+      { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+      { $group: { _id: '$supplierId', total: { $sum: '$calculatedAmount' } } }
     ]);
 
     const detailedSuppliers = suppliers.map(s => {
@@ -623,7 +625,11 @@ export const getConsolidatedLedgers = async (req, res) => {
             .populate('toAccountId', 'name isMillKhata isDailyKhata')
             .lean(),
           Sale.aggregate([{ $match: { ...matchBefore, customerId: id } }, { $group: { _id: null, sum: { $sum: '$totalAmount' } } }]),
-          linkedId ? StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: linkedId } }, { $group: { _id: null, sum: { $sum: '$amount' } } }]) : []
+          linkedId ? StockEntry.aggregate([
+            { $match: { ...matchBefore, supplierId: linkedId } },
+            { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+            { $group: { _id: null, sum: { $sum: '$calculatedAmount' } } }
+          ]) : []
         ]);
         
         // Calculate with proper transfer direction
@@ -659,7 +665,11 @@ export const getConsolidatedLedgers = async (req, res) => {
             .populate('fromAccountId', 'name isMillKhata isDailyKhata')
             .populate('toAccountId', 'name isMillKhata isDailyKhata')
             .lean(),
-          StockEntry.aggregate([{ $match: { ...matchBefore, supplierId: id } }, { $group: { _id: null, sum: { $sum: '$amount' } } }])
+          StockEntry.aggregate([
+            { $match: { ...matchBefore, supplierId: id } },
+            { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+            { $group: { _id: null, sum: { $sum: '$calculatedAmount' } } }
+          ])
         ]);
         
         // Calculate with proper transfer direction
@@ -864,7 +874,13 @@ export const getConsolidatedLedgers = async (req, res) => {
       const purchases = activePurchases.filter(p => getId(p.supplierId) === sId);
 
       const ledger = [];
-      purchases.forEach(p => ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: p.amount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) }));
+      purchases.forEach(p => {
+        // Fix: Calculate from items to avoid double-counted p.amount
+        const calculatedAmount = (p.items && p.items.length > 0)
+          ? p.items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
+          : Number(p.amount) || 0;
+        ledger.push({ date: p.date, description: `Purchase: ${p._id.toString().slice(-6)} (Truck: ${p.truckNumber || '-'})`, debit: 0, credit: calculatedAmount, bags: (p.items || []).reduce((sum, it) => sum + (it.kattay || 0), 0) });
+      });
       trans.forEach(t => {
         // Supplier Ledger Logic (Mill's Perspective on Supplier Khata):
         // Withdraw/Expense = Mill paid supplier = DEBIT (Naam - liability reduced)

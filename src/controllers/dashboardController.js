@@ -27,11 +27,15 @@ export const getSummary = async (req, res) => {
       { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' } } }, // full total for today
     ]),
     getCurrentStockData(req.models),
-    StockEntry.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
+    StockEntry.aggregate([
+      { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+      { $group: { _id: null, total: { $sum: '$calculatedAmount' } } }
+    ]),
     Sale.aggregate([{ $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
     StockEntry.aggregate([
       { $match: { paymentStatus: { $ne: 'paid' } } },
-      { $group: { _id: null, count: { $sum: 1 }, totalPending: { $sum: { $subtract: ['$amount', '$amountPaid'] } } } },
+      { $addFields: { calculatedAmount: { $sum: { $ifNull: ['$items.amount', []] } } } },
+      { $group: { _id: null, count: { $sum: 1 }, totalPending: { $sum: { $subtract: ['$calculatedAmount', '$amountPaid'] } } } },
     ]),
   ]);
 
