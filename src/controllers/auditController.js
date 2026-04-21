@@ -66,19 +66,25 @@ export const getAuditSummary = async (req, res) => {
     // ----------------------------------------------------
     // PERFECT UNIVERSAL OPENING BALANCE SYNCHRONIZATION
     // ----------------------------------------------------
+    // Convert millAccIds to strings for reliable comparison
+    const millAccIdStrings = millAccIds.map(id => id.toString());
+
     const prevTransactions = await Transaction.aggregate([
       { $match: { date: { $lt: opBalBoundary }, type: { $ne: 'accrual' } } },
+      {
+        $addFields: {
+          // Convert ObjectIds to strings for reliable comparison
+          toAccIdStr: { $toString: '$toAccountId' },
+          fromAccIdStr: { $toString: '$fromAccountId' }
+        }
+      },
       {
         $group: {
           _id: null,
           totalIn: {
             $sum: {
               $cond: [
-                {
-                  $or: [
-                    { $in: ['$toAccountId', millAccIds] } // Standard Inflow: Money TO mill accounts
-                  ]
-                },
+                { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
                 '$amount',
                 0
               ]
@@ -87,7 +93,7 @@ export const getAuditSummary = async (req, res) => {
           totalOut: {
             $sum: {
               $cond: [
-                { $in: ['$fromAccountId', millAccIds] }, // Standard Outflow
+                { $in: ['$fromAccIdStr', millAccIdStrings] }, // Standard Outflow
                 '$amount',
                 0
               ]
@@ -400,19 +406,23 @@ export const getAuditSummary = async (req, res) => {
     // ----------------------------------------------------
     // We replicate the exact historical tracking logic of dailyMemoController
     // preventing mathematical deviations like the Mill->Bank proxy inflations.
+    // Note: millAccIdStrings already defined above
     const allTimeAgg = await Transaction.aggregate([
       { $match: { date: { $lte: toDate }, type: { $ne: 'accrual' } } },
+      {
+        $addFields: {
+          // Convert ObjectIds to strings for reliable comparison
+          toAccIdStr: { $toString: '$toAccountId' },
+          fromAccIdStr: { $toString: '$fromAccountId' }
+        }
+      },
       {
         $group: {
           _id: null,
           totalAllTimeIn: {
             $sum: {
               $cond: [
-                {
-                  $or: [
-                    { $in: ['$toAccountId', millAccIds] } // Standard Inflow: Money TO mill accounts
-                  ]
-                },
+                { $in: ['$toAccIdStr', millAccIdStrings] }, // Standard Inflow: Money TO mill accounts
                 '$amount',
                 0
               ]
@@ -421,7 +431,7 @@ export const getAuditSummary = async (req, res) => {
           totalAllTimeOut: {
             $sum: {
               $cond: [
-                { $in: ['$fromAccountId', millAccIds] },
+                { $in: ['$fromAccIdStr', millAccIdStrings] },
                 '$amount',
                 0
               ]
