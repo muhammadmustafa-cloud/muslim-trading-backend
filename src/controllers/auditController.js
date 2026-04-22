@@ -54,7 +54,7 @@ export const getAuditSummary = async (req, res) => {
     ]);
 
     const isPeriodAudit = !!(dateFrom || dateTo);
-    const activityMatch = { date: { $gte: fromDate, $lte: toDate } };
+    const activityMatch = { date: { $gte: fromDate, $lte: toDate }, type: { $ne: 'accrual' } };
 
     // Calculate Mill Opening Balance (Pichli Wasooli) - Balance BEFORE the start of the selected range.
     const opBalBoundary = fromDate;
