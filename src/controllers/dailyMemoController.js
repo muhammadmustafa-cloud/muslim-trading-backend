@@ -70,10 +70,6 @@ export const getDailyMemo = async (req, res) => {
 
   let historicalNetChange = 0;
   
-  // DEBUG: Log the number of previous transactions
-  console.log(`[DEBUG] prevTransactionsList count: ${prevTransactionsList.length}`);
-  console.log(`[DEBUG] fromDate: ${fromDate}`);
-  
   prevTransactionsList.forEach(t => {
     const fromIsMill = t.fromAccountId?.isDailyKhata || t.fromAccountId?.isMillKhata;
     const toIsMill = t.toAccountId?.isDailyKhata || t.toAccountId?.isMillKhata;
@@ -106,36 +102,26 @@ export const getDailyMemo = async (req, res) => {
       if (t.category === 'salary_accrual') historicalNetChange += t.amount;
       if (t.type === 'withdraw' || t.type === 'salary') historicalNetChange -= t.amount;
     } else {
-      // Full Mill Summary - Only count EXTERNAL flows (ignore internal transfers between mill accounts)
-      const isInternalTransfer = t.type === 'transfer' && fromIsMill && toIsMill;
+      // Full Mill Summary - Calculate net cash position change
+      // Opening balance = Base + Net flow from previous transactions
+      // Net flow = Money entering mill accounts - Money leaving mill accounts
       
-      if (!isInternalTransfer) {
-        // Money leaving mill accounts (expense, salary, withdraw)
-        if (fromIsMill) {
-          historicalNetChange -= t.amount;
-          if (t.amount === 10000) {
-            console.log(`[DEBUG] Subtracting 10000 from historicalNetChange (fromIsMill). Transaction: ${t.type}, ${t.amount}, from: ${t.fromAccountId?.name}, fromIsMill: ${fromIsMill}`);
-          }
-        }
-        // Money entering mill accounts (deposits)
-        // BUT NOT for salary/expense transactions - those are money LEAVING, not arriving
-        if (toIsMill && t.type !== 'salary' && t.category !== 'expense') {
-          historicalNetChange += t.amount;
-          if (t.amount === 10000) {
-            console.log(`[DEBUG] Adding 10000 to historicalNetChange (toIsMill). Transaction: ${t.type}, ${t.amount}, to: ${t.toAccountId?.name}`);
-          }
-        }
+      // Money entering mill accounts (deposits, transfers to mill)
+      if (toIsMill) {
+        historicalNetChange += t.amount;
       }
-      // Internal transfers net to zero (both + and - cancel out)
+      
+      // Money leaving mill accounts (withdrawals, expenses, transfers from mill)
+      if (fromIsMill) {
+        historicalNetChange -= t.amount;
+      }
+      
+      // Note: Internal transfers between mill accounts cancel out (+amount and -amount)
+      // So they don't affect the net calculation
     }
   });
 
-  console.log(`[DEBUG] baseOpeningBalance: ${baseOpeningBalance}`);
-  console.log(`[DEBUG] historicalNetChange: ${historicalNetChange}`);
-  
   const openingBalance = baseOpeningBalance + historicalNetChange;
-  
-  console.log(`[DEBUG] calculated openingBalance: ${openingBalance}`);
 
   const currMatch = {
     date: { $gte: fromDate, $lte: toDate },
