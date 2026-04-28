@@ -42,9 +42,6 @@ export const getDailyMemo = async (req, res) => {
   const millAccIds = allMillAccs.map((a) => a._id.toString());
   const millAccObjectIdIds = allMillAccs.map((a) => a._id);
 
-  // Fetch ALL accounts for full summary (includes bank accounts with opening balances)
-  const allAccounts = await Account.find().lean();
-
   // 1. Calculate Base Opening Balance
   let baseOpeningBalance = 0;
   if (accountId) {
@@ -60,8 +57,8 @@ export const getDailyMemo = async (req, res) => {
     const maz = await Mazdoor.findById(mazdoorId).lean();
     baseOpeningBalance = maz?.openingBalance || 0;
   } else {
-    // Full Mill Summary — sum ALL accounts' opening balances (bank accounts + mill accounts)
-    baseOpeningBalance = allAccounts.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+    // Full Mill Summary — sum all mill accounts' opening balances
+    baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
   }
 
   // 2. Calculate Historical Cash Flow - SIMPLIFIED APPROACH
@@ -356,15 +353,12 @@ export const getDailyMemo = async (req, res) => {
     historicalNetChange,
     calculatedOpeningBalance: openingBalance,
     prevTransactionsCount: prevTransactionsList.length,
-    allAccountsSummary: allAccounts
-      .filter(a => (a.openingBalance || 0) !== 0)
-      .map(a => ({ 
-        name: a.name, 
-        openingBalance: a.openingBalance || 0,
-        isDailyKhata: a.isDailyKhata,
-        isMillKhata: a.isMillKhata
-      }))
-      .sort((a, b) => b.openingBalance - a.openingBalance),
+    millAccountsSummary: allMillAccs.map(a => ({ 
+      name: a.name, 
+      openingBalance: a.openingBalance || 0,
+      isDailyKhata: a.isDailyKhata,
+      isMillKhata: a.isMillKhata
+    })),
     samplePrevTransactions: prevTransactionsList.slice(-5).map(t => ({
       date: t.date,
       type: t.type,
