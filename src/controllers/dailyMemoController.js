@@ -344,7 +344,34 @@ export const getDailyMemo = async (req, res) => {
   })
     .sort({ date: 1, createdAt: 1 })
     .lean();
-res.set("Cache-Control", "no-store");
+  // Prepare debug info for troubleshooting
+  const debug = {
+    dateRange: { from: fromStr, to: toStr },
+    fromDateUTC: fromDate,
+    toDateUTC: toDate,
+    baseOpeningBalance,
+    historicalNetChange,
+    calculatedOpeningBalance: openingBalance,
+    prevTransactionsCount: prevTransactionsList.length,
+    millAccountsSummary: allMillAccs.map(a => ({ 
+      name: a.name, 
+      openingBalance: a.openingBalance || 0,
+      isDailyKhata: a.isDailyKhata,
+      isMillKhata: a.isMillKhata
+    })),
+    samplePrevTransactions: prevTransactionsList.slice(-5).map(t => ({
+      date: t.date,
+      type: t.type,
+      amount: t.amount,
+      fromAccount: t.fromAccountId?.name,
+      fromIsMill: t.fromAccountId?.isDailyKhata || t.fromAccountId?.isMillKhata,
+      toAccount: t.toAccountId?.name,
+      toIsMill: t.toAccountId?.isDailyKhata || t.toAccountId?.isMillKhata,
+      category: t.category
+    }))
+  };
+
+  res.set("Cache-Control", "no-store");
   res.json({
     success: true,
     data: rows,
@@ -359,5 +386,6 @@ res.set("Cache-Control", "no-store");
       net: todayIn - todayOut,
       closingBalance: openingBalance + todayIn - todayOut,
     },
+    debug, // ← Now visible in browser DevTools
   });
 };
