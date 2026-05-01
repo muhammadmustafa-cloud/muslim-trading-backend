@@ -132,7 +132,12 @@ export const getHistory = async (req, res) => {
   const [stockEntries, sales, transactions] = await Promise.all([
     StockEntry.find(stockMatch).populate('items.itemId', 'name').lean(),
     saleMatch ? Sale.find(saleMatch).populate('items.itemId', 'name').lean() : [],
-    Transaction.find(transMatch).populate('fromAccountId', 'name').populate('toAccountId', 'name').lean(),
+    Transaction.find(transMatch)
+      .populate('fromAccountId', 'name')
+      .populate('toAccountId', 'name')
+      .populate('customerId', 'name')
+      .populate('supplierId', 'name')
+      .lean(),
   ]);
 
   // Backward compatibility: transactions linked via stockEntryId
@@ -224,9 +229,29 @@ export const getHistory = async (req, res) => {
     // If transfer: check if this supplier is the destination (receiver) -> Debit, else Credit
     const isThisSupplierDest = p.type === 'transfer' && p.supplierId?.toString() === req.params.id;
     const isDebit = p.type === 'withdraw' || isThisSupplierDest;
+    
+    // Get proper name for payment source/recipient
+    const fromName = p.fromAccountId?.name || p.customerId?.name || p.supplierId?.name || 'Cash';
+    const toName = p.toAccountId?.name || p.supplierId?.name || p.customerId?.name || 'Cash';
+    
+    // Build description with proper names
+    let paymentDesc;
+    if (isDebit) {
+      // Payment paid TO someone
+      paymentDesc = `Payment Paid to ${toName}`;
+    } else {
+      // Payment received FROM someone
+      paymentDesc = `Payment Received from ${fromName}`;
+    }
+    
+    // Add note if exists
+    if (p.note) {
+      paymentDesc += ` (${p.note})`;
+    }
+    
     ledger.push({
       date: p.date,
-      description: `Payment: ${p.note || (isDebit ? 'Paid to Supplier' : 'Received')}`,
+      description: paymentDesc,
       bags: 0,
       debit: isDebit ? p.amount : 0,
       credit: isDebit ? 0 : p.amount,

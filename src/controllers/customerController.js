@@ -134,7 +134,12 @@ export const getHistory = async (req, res) => {
   const [sales, stockEntries, transactions] = await Promise.all([
     Sale.find(saleMatch).populate('items.itemId', 'name').populate('accountId', 'name').lean(),
     stockMatch ? StockEntry.find(stockMatch).populate('items.itemId', 'name').lean() : [],
-    Transaction.find(transMatch).populate('fromAccountId', 'name').populate('toAccountId', 'name').lean(),
+    Transaction.find(transMatch)
+      .populate('fromAccountId', 'name')
+      .populate('toAccountId', 'name')
+      .populate('customerId', 'name')
+      .populate('supplierId', 'name')
+      .lean(),
   ]);
 
   // Backward compatibility: transactions linked via saleId
@@ -222,9 +227,29 @@ export const getHistory = async (req, res) => {
     // If transfer: check if this customer is the source (giver) -> Credit, else Debit
     const isThisCustomerSource = p.type === 'transfer' && p.customerId?.toString() === req.params.id;
     const isCredit = p.type === 'deposit' || isThisCustomerSource;
+    
+    // Get proper name for payment source/recipient
+    const fromName = p.fromAccountId?.name || p.customerId?.name || p.supplierId?.name || 'Cash';
+    const toName = p.toAccountId?.name || p.supplierId?.name || p.customerId?.name || 'Cash';
+    
+    // Build description with proper names
+    let paymentDesc;
+    if (isCredit) {
+      // Payment received FROM someone
+      paymentDesc = `Payment Received from ${fromName}`;
+    } else {
+      // Payment paid TO someone
+      paymentDesc = `Payment Paid to ${toName}`;
+    }
+    
+    // Add note if exists
+    if (p.note) {
+      paymentDesc += ` (${p.note})`;
+    }
+    
     ledger.push({
       date: p.date,
-      description: `Payment: ${p.note || (isCredit ? 'Received' : 'Paid')}`,
+      description: paymentDesc,
       bags: 0,
       debit: isCredit ? 0 : p.amount,
       credit: isCredit ? p.amount : 0,
