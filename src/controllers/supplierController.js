@@ -284,6 +284,25 @@ export const getHistory = async (req, res) => {
 };
 
 /** Get all suppliers with outstanding balances (Payables) */
+export const remove = async (req, res) => {
+  const { Supplier, Customer } = req.models;
+  const supplier = await Supplier.findById(req.params.id);
+  if (!supplier) {
+    return res.status(404).json({ success: false, message: 'Supplier not found' });
+  }
+  
+  // If linked to customer, unlink
+  if (supplier.linkedCustomerId) {
+    await Customer.findByIdAndUpdate(supplier.linkedCustomerId, { 
+      isAlsoSupplier: false, 
+      linkedSupplierId: null 
+    });
+  }
+  
+  await Supplier.findByIdAndDelete(req.params.id);
+  res.json({ success: true, message: 'Supplier deleted successfully' });
+};
+
 export const getPayables = async (req, res) => {
   const { StockEntry } = req.models;
   const payables = await StockEntry.aggregate([

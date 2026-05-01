@@ -285,6 +285,25 @@ export const getHistory = async (req, res) => {
 /**
  * Returns customers with outstanding receivables (unpaid/partial sales), grouped by customer.
  */
+export const remove = async (req, res) => {
+  const { Customer, Supplier } = req.models;
+  const customer = await Customer.findById(req.params.id);
+  if (!customer) {
+    return res.status(404).json({ success: false, message: 'Customer not found' });
+  }
+  
+  // If linked to supplier, unlink
+  if (customer.linkedSupplierId) {
+    await Supplier.findByIdAndUpdate(customer.linkedSupplierId, { 
+      isAlsoCustomer: false, 
+      linkedCustomerId: null 
+    });
+  }
+  
+  await Customer.findByIdAndDelete(req.params.id);
+  res.json({ success: true, message: 'Customer deleted successfully' });
+};
+
 export const getReceivables = async (req, res) => {
   const { Sale } = req.models;
   const sales = await Sale.find({ paymentStatus: { $in: ['pending', 'partial'] } })

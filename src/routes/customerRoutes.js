@@ -13,5 +13,6 @@ router.get('/:id/history', asyncHandler(customerController.getHistory));
 router.get('/:id', asyncHandler(customerController.getById));
 router.post('/', asyncHandler(customerController.create));
 router.put('/:id', asyncHandler(customerController.update));
+router.delete('/:id', asyncHandler(customerController.remove));
 
 export default router;
