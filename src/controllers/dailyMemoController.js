@@ -13,6 +13,189 @@ function dateFilter(dateFrom, dateTo) {
   return buildUTCDateFilter(dateFrom, dateTo);
 }
 
+const buildLedgerRows = (transactions) => {
+  const rows = [];
+
+  const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
+
+  transactions.forEach((t) => {
+    const type = t.type;
+    const category = t.category || "";
+    let partyName = t.customerId?.name || t.supplierId?.name || t.mazdoorId?.name || "";
+    const hasParty = !!partyName;
+
+    let desc = t.note || category.replace("_", " ");
+
+    if (t.saleId) {
+      const bill = t.saleId._id?.toString().slice(-6).toUpperCase() || "—";
+      const itemNames = t.saleId.items?.length > 0 
+        ? t.saleId.items.map((it) => it.itemId?.name || "Item").join(", ") 
+        : t.saleId.itemName || "Item";
+      desc = `Sale — ${itemNames} (Bill: ${bill})`;
+    } else if (t.stockEntryId) {
+      const bill = t.stockEntryId._id?.toString().slice(-6).toUpperCase() || "—";
+      const itemNames = t.stockEntryId.items?.length > 0 
+        ? t.stockEntryId.items.map((it) => it.itemId?.name || "Item").join(", ") 
+        : "Item";
+      desc = `Purchase — ${itemNames} (Bill: ${bill})`;
+    } else if (t.machineryPurchaseId) {
+      desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || "Part/Asset"}`;
+    } else if (t.taxTypeId) desc = "Tax Payment";
+    else if (t.expenseTypeId) desc = "General Expense";
+    else if (t.rawMaterialHeadId) desc = `Raw Material — ${t.rawMaterialHeadId.name || "Item"}`;
+    else if (category === "mill_expense") desc = "Mill Expense";
+    else if (category === "mazdoor_expense") desc = "Mazdoor Expense";
+
+    let displayName = partyName;
+    if (!displayName) {
+      if (category === "mill_expense") displayName = (t.note || "").replace(/^Mill:\s*/i, "") || "Mill Expense";
+      else if (category === "mazdoor_expense") displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : t.note || "Mazdoor Expense";
+      else if (t.mazdoorId) displayName = t.mazdoorId.name || "Mazdoor";
+      else if (t.taxTypeId) displayName = t.taxTypeId.name || "Tax Payment";
+      else if (t.expenseTypeId) displayName = t.expenseTypeId.name || "General Expense";
+      else if (t.rawMaterialHeadId) displayName = t.rawMaterialHeadId.name || "Raw Material";
+      else displayName = "Manual";
+    }
+
+    if (t.paymentMethod === "cheque") desc += ` | Cheque #${t.chequeNumber || "—"}`;
+    else if (t.paymentMethod === "online") desc += " | Online";
+
+    const isInternalTransfer = t.type === "transfer" && 
+      isOperationalAccount(t.fromAccountId) && 
+      isOperationalAccount(t.toAccountId);
+
+    // ==================== ROW GENERATION ====================
+    if (type === "deposit") {
+      const isBankDest = t.toAccountId?.type === "Bank";
+
+      // Primary: Money entering account
+      rows.push({
+        type: category || "deposit",
+        date: formatDateOnly(t.date),
+        name: t.toAccountId?.name || "Account",
+        description: desc,
+        accountName: displayName || "Manual",
+        amount: t.amount,
+        amountType: isBankDest ? "out" : "in",
+        isExternal: !isInternalTransfer,
+        referenceId: t._id,
+      });
+
+      // Contra (Mirror)
+      if (hasParty && t.toAccountId?.showMirrorInDailyMemo !== false) {
+        rows.push({
+          type: category || "deposit",
+          date: formatDateOnly(t.date),
+          name: displayName,
+          description: desc,
+          accountName: t.toAccountId?.name || "Manual",
+          amount: t.amount,
+          amountType: isBankDest ? "in" : "out",
+          isExternal: !isInternalTransfer,
+          referenceId: t._id,
+        });
+      }
+    } 
+    else if (["withdraw", "salary", "tax", "expense"].includes(type)) {
+      const isBankSource = t.fromAccountId?.type === "Bank";
+
+      // Primary: Money leaving account
+      rows.push({
+        type: category || type,
+        date: formatDateOnly(t.date),
+        name: t.fromAccountId?.name || "Account",
+        description: desc,
+        accountName: displayName || "Manual",
+        amount: t.amount,
+        amountType: "out",
+        isExternal: !isInternalTransfer,
+        referenceId: t._id,
+      });
+
+      // Contra
+      const shouldContra = (hasParty || (isBankSource && displayName)) && 
+                          t.fromAccountId?.showMirrorInDailyMemo !== false;
+
+      if (shouldContra) {
+        rows.push({
+          type: category || type,
+          date: formatDateOnly(t.date),
+          name: displayName,
+          description: desc,
+          accountName: t.fromAccountId?.name || "Manual",
+          amount: t.amount,
+          amountType: "in",
+          isExternal: !isInternalTransfer,
+          referenceId: t._id,
+        });
+      }
+    } 
+    else if (type === "transfer") {
+      const isPartyTransfer = t.customerId && (t.supplierId || t.mazdoorId);
+      const isAccountToPartyTransfer = t.fromAccountId && (t.supplierId || t.mazdoorId);
+
+      if (isPartyTransfer || isAccountToPartyTransfer) {
+        const sourceName = t.customerId?.name || t.fromAccountId?.name || "Source";
+        const recipientName = t.supplierId?.name || t.mazdoorId?.name || "Recipient";
+
+        rows.push({
+          type: "transfer_in",
+          date: formatDateOnly(t.date),
+          name: `Direct Transfer to ${recipientName}`,
+          description: t.note || "Party-to-Party Transfer",
+          accountName: sourceName,
+          amount: t.amount,
+          amountType: "in",
+          isExternal: false,
+          referenceId: t._id
+        });
+
+        rows.push({
+          type: "transfer_out",
+          date: formatDateOnly(t.date),
+          name: `Direct Transfer from ${sourceName}`,
+          description: t.note || "Party-to-Party Transfer",
+          accountName: recipientName,
+          amount: t.amount,
+          amountType: "out",
+          isExternal: false,
+          referenceId: t._id
+        });
+      } else {
+        // Normal Account to Account Transfer
+        if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
+          rows.push({
+            type: "transfer_out",
+            date: formatDateOnly(t.date),
+            name: t.fromAccountId?.name || "Account",
+            description: `Transfer to ${t.toAccountId?.name || "—"}`,
+            accountName: t.fromAccountId?.name || "Manual",
+            amount: t.amount,
+            amountType: "in",           // From = Credit (in)
+            isExternal: false,
+            referenceId: t._id
+          });
+        }
+        if (t.toAccountId?.showMirrorInDailyMemo !== false) {
+          rows.push({
+            type: "transfer_in",
+            date: formatDateOnly(t.date),
+            name: t.toAccountId?.name || "Account",
+            description: `Transfer from ${t.fromAccountId?.name || "—"}`,
+            accountName: t.toAccountId?.name || "Manual",
+            amount: t.amount,
+            amountType: "out",          // To = Debit (out)
+            isExternal: false,
+            referenceId: t._id
+          });
+        }
+      }
+    }
+  });
+
+  return rows;
+};
+
 /**
  * GET /api/daily-memo
  * Universal Daily Ledger — strictly follows CASH FLOW using the Transaction model.
@@ -28,21 +211,7 @@ export const getDailyMemo = async (req, res) => {
   const fromDate = toUTCStartOfDay(fromStr);
   const toDate = toUTCEndOfDay(toStr);
 
-  const prevMatch = { date: { $lt: fromDate }, type: { $ne: "accrual" } };
-  if (accountId) {
-    const id = new mongoose.Types.ObjectId(accountId);
-    prevMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
-  }
-  if (customerId) prevMatch.customerId = new mongoose.Types.ObjectId(customerId);
-  if (supplierId) prevMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
-  if (mazdoorId) prevMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
-
-  // 1. Identify "Mill Accounts" (Daily & Mill Khata)
-  const allMillAccs = await Account.find({ $or: [{ isDailyKhata: true }, { isMillKhata: true }] }).lean();
-  const millAccIds = allMillAccs.map((a) => a._id.toString());
-  const millAccObjectIdIds = allMillAccs.map((a) => a._id);
-
-  // 1. Calculate Base Opening Balance
+  // 1. Base Opening Balance (from Account/Customer/Supplier/Mazdoor)
   let baseOpeningBalance = 0;
   if (accountId) {
     const acc = await Account.findById(accountId).lean();
@@ -57,90 +226,47 @@ export const getDailyMemo = async (req, res) => {
     const maz = await Mazdoor.findById(mazdoorId).lean();
     baseOpeningBalance = maz?.openingBalance || 0;
   } else {
-    // Full Mill Summary — sum all mill accounts' opening balances
+    const allMillAccs = await Account.find({ $or: [{ isDailyKhata: true }, { isMillKhata: true }] }).lean();
     baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
   }
 
-  // 2. Calculate Historical Cash Flow - SIMPLIFIED APPROACH
-  // Fetch all transactions before the date range and calculate running balance
-  const prevTransactionsList = await Transaction.find(prevMatch)
-    .populate("fromAccountId", "isDailyKhata isMillKhata")
-    .populate("toAccountId", "isDailyKhata isMillKhata")
+  // ====================== CALCULATE OPENING BALANCE (PREVIOUS DAYS) ======================
+  const prevToDate = new Date(fromDate.getTime() - 1); // One ms before fromDate
+
+  const prevMatch = {
+    date: { $lte: prevToDate },
+    type: { $ne: "accrual" },
+  };
+
+  if (accountId) {
+    const id = new mongoose.Types.ObjectId(accountId);
+    prevMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
+  }
+  if (customerId) prevMatch.customerId = new mongoose.Types.ObjectId(customerId);
+  if (supplierId) prevMatch.supplierId = new mongoose.Types.ObjectId(supplierId);
+  if (mazdoorId) prevMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+
+  const prevTransactions = await Transaction.find(prevMatch)
+    .populate("fromAccountId", "name type isDailyKhata isMillKhata showMirrorInDailyMemo")
+    .populate("toAccountId", "name type isDailyKhata isMillKhata showMirrorInDailyMemo")
+    .populate("supplierId", "name")
+    .populate("customerId", "name")
+    .populate("mazdoorId", "name")
     .lean();
 
-  let historicalNetChange = 0;
-  
-  // DEBUG: Log the number of previous transactions
-  console.log(`[DEBUG] prevTransactionsList count: ${prevTransactionsList.length}`);
-  console.log(`[DEBUG] fromDate: ${fromDate}`);
-  
-  prevTransactionsList.forEach(t => {
-    const fromIsMill = t.fromAccountId?.isDailyKhata || t.fromAccountId?.isMillKhata;
-    const toIsMill = t.toAccountId?.isDailyKhata || t.toAccountId?.isMillKhata;
-    
-    if (accountId) {
-      // Specific account view
-      const accObjId = accountId.toString();
-      const fromId = t.fromAccountId?._id?.toString();
-      const toId = t.toAccountId?._id?.toString();
-      
-      if (t.type === 'transfer') {
-        // For transfers: money ARRIVING at account = +ve, LEAVING = -ve
-        if (fromId === accObjId) historicalNetChange -= t.amount; // Money left
-        if (toId === accObjId) historicalNetChange += t.amount;   // Money arrived
-      } else {
-        // For deposits/withdrawals
-        if (t.type === 'deposit' && toId === accObjId) historicalNetChange += t.amount;
-        if ((t.type === 'withdraw' || t.category === 'expense') && fromId === accObjId) historicalNetChange -= t.amount;
-      }
-    } else if (customerId) {
-      // Customer ledger: deposits increase balance, withdraws decrease
-      if (t.type === 'deposit') historicalNetChange += t.amount;
-      if (t.type === 'withdraw') historicalNetChange -= t.amount;
-    } else if (supplierId) {
-      // Supplier ledger: deposits increase balance, withdraws decrease
-      if (t.type === 'deposit') historicalNetChange += t.amount;
-      if (t.type === 'withdraw') historicalNetChange -= t.amount;
-    } else if (mazdoorId) {
-      // Mazdoor ledger
-      if (t.category === 'salary_accrual') historicalNetChange += t.amount;
-      if (t.type === 'withdraw' || t.type === 'salary') historicalNetChange -= t.amount;
-    } else {
-      // Full Mill Summary - Only count EXTERNAL flows (ignore internal transfers between mill accounts)
-      const isInternalTransfer = t.type === 'transfer' && fromIsMill && toIsMill;
-      
-      if (!isInternalTransfer) {
-        // Money leaving mill accounts (expense, salary, withdraw)
-        if (fromIsMill) {
-          historicalNetChange -= t.amount;
-          if (t.amount === 10000) {
-            console.log(`[DEBUG] Subtracting 10000 from historicalNetChange (fromIsMill). Transaction: ${t.type}, ${t.amount}, from: ${t.fromAccountId?.name}, fromIsMill: ${fromIsMill}`);
-          }
-        }
-        // Money entering mill accounts (deposits)
-        // BUT NOT for salary/expense transactions - those are money LEAVING, not arriving
-        if (toIsMill && t.type !== 'salary' && t.category !== 'expense') {
-          historicalNetChange += t.amount;
-          if (t.amount === 10000) {
-            console.log(`[DEBUG] Adding 10000 to historicalNetChange (toIsMill). Transaction: ${t.type}, ${t.amount}, to: ${t.toAccountId?.name}`);
-          }
-        }
-      }
-      // Internal transfers net to zero (both + and - cancel out)
-    }
-  });
+  const prevRows = buildLedgerRows(prevTransactions);
 
-  console.log(`[DEBUG] baseOpeningBalance: ${baseOpeningBalance}`);
-  console.log(`[DEBUG] historicalNetChange: ${historicalNetChange}`);
-  
-  const openingBalance = baseOpeningBalance + historicalNetChange;
-  
-  console.log(`[DEBUG] calculated openingBalance: ${openingBalance}`);
+  const historicalIn = prevRows.reduce((sum, r) => sum + (r.amountType === "in" ? Number(r.amount) : 0), 0);
+  const historicalOut = prevRows.reduce((sum, r) => sum + (r.amountType === "out" ? Number(r.amount) : 0), 0);
 
+  const openingBalance = baseOpeningBalance + historicalIn - historicalOut;
+
+  // ====================== CURRENT PERIOD TRANSACTIONS ======================
   const currMatch = {
     date: { $gte: fromDate, $lte: toDate },
     type: { $ne: "accrual" },
   };
+
   if (accountId) {
     const id = new mongoose.Types.ObjectId(accountId);
     currMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
@@ -151,214 +277,33 @@ export const getDailyMemo = async (req, res) => {
 
   const transactions = await Transaction.find(currMatch)
     .populate("fromAccountId", "name type isDailyKhata isMillKhata showMirrorInDailyMemo")
-    .populate("toAccountId", "name isDailyKhata isMillKhata showMirrorInDailyMemo")
+    .populate("toAccountId", "name type isDailyKhata isMillKhata showMirrorInDailyMemo")
     .populate("supplierId", "name")
     .populate("customerId", "name")
     .populate("mazdoorId", "name")
-    .populate({
-      path: "saleId",
-      select: "truckNumber items itemName",
-      populate: { path: "items.itemId", select: "name" },
-    })
-    .populate({
-      path: "stockEntryId",
-      select: "truckNumber items",
-      populate: { path: "items.itemId", select: "name" },
-    })
-    .populate({
-      path: "machineryPurchaseId",
-      populate: { path: "machineryItemId", select: "name" },
-    })
+    .populate({ path: "saleId", select: "truckNumber items itemName", populate: { path: "items.itemId", select: "name" } })
+    .populate({ path: "stockEntryId", select: "truckNumber items", populate: { path: "items.itemId", select: "name" } })
+    .populate({ path: "machineryPurchaseId", populate: { path: "machineryItemId", select: "name" } })
     .populate("taxTypeId", "name")
     .populate("expenseTypeId", "name")
     .populate("rawMaterialHeadId", "name")
     .sort({ date: 1, createdAt: 1 })
     .lean();
 
-  const isOperationalAccount = (acc) => !!(acc?.isDailyKhata || acc?.isMillKhata);
-  const isInternalTransfer = (t) => t.type === "transfer" && isOperationalAccount(t.fromAccountId) && isOperationalAccount(t.toAccountId);
-  const rows = [];
+  const rows = buildLedgerRows(transactions);
 
-  transactions.forEach((t) => {
-    const type = t.type;
-    const category = t.category || "";
-    let partyName = t.customerId?.name || t.supplierId?.name || "";
-    const hasParty = !!partyName;
-
-    let desc = "";
-    if (t.saleId) {
-      const bill = t.saleId._id?.toString().slice(-6).toUpperCase() || "—";
-      const itemNames = t.saleId.items?.length > 0 ? t.saleId.items.map((it) => it.itemId?.name || "Item").join(", ") : t.saleId.itemName || "Item";
-      desc = `Sale — ${itemNames} (Bill: ${bill})`;
-    } else if (t.stockEntryId) {
-      const bill = t.stockEntryId._id?.toString().slice(-6).toUpperCase() || "—";
-      const itemNames = t.stockEntryId.items?.length > 0 ? t.stockEntryId.items.map((it) => it.itemId?.name || "Item").join(", ") : "Item";
-      desc = `Purchase — ${itemNames} (Bill: ${bill})`;
-    } else if (t.machineryPurchaseId) {
-      desc = `Machinery — ${t.machineryPurchaseId.machineryItemId?.name || "Part/Asset"}`;
-    } else if (t.taxTypeId) desc = "Tax Payment";
-    else if (t.expenseTypeId) desc = "General Expense";
-    else if (t.rawMaterialHeadId) desc = `Raw Material — ${t.rawMaterialHeadId.name || "Item"}`;
-    else if (category === "mill_expense") desc = "Mill Expense";
-    else if (category === "mazdoor_expense") desc = "Mazdoor Expense";
-    else desc = t.note || category.replace("_", " ");
-
-    let displayName = partyName;
-    if (!displayName) {
-      if (category === "mill_expense") displayName = (t.note || "").replace(/^Mill:\s*/i, "") || "Mill Expense";
-      else if (category === "mazdoor_expense") displayName = t.mazdoorId?.name ? `Mazdoor: ${t.mazdoorId.name}` : t.note || "Mazdoor Expense";
-      else if (t.mazdoorId) displayName = t.mazdoorId.name || "Mazdoor";
-      else if (t.taxTypeId) displayName = t.taxTypeId.name || "Tax Payment";
-      else if (t.expenseTypeId) displayName = t.expenseTypeId.name || "General Expense";
-      else if (t.rawMaterialHeadId) displayName = t.rawMaterialHeadId.name || "Raw Material";
-    }
-
-    if (t.paymentMethod === "cheque") desc += ` | Cheque #${t.chequeNumber || "—"}`;
-    else if (t.paymentMethod === "online") desc += " | Online";
-
-    // Track "Master Totals" only for external cash flow
-    const isExternal = !isInternalTransfer(t) && type !== "transfer";
-
-    if (type === "deposit") {
-      const isBankDest = t.toAccountId?.type === "Bank";
-      const accountAmountType = isBankDest ? "out" : "in"; // Bank Deposit = Money leaving box (Kharch), Cash Deposit = Aamad
-      const partyAmountType = isBankDest ? "in" : "out"; // If giving to bank (Kharch), the "Source" is Aamad? No, usually symmetric.
-
-      // 1. Primary Move: Money enters the Account (Credit/Aamad from Shop perspective)
-      rows.push({
-        type: category || "deposit",
-        date: formatDateOnly(t.date),
-        name: t.toAccountId?.name || "Account",
-        description: desc,
-        accountName: displayName || "Manual",
-        amount: t.amount,
-        amountType: accountAmountType,
-        isExternal,
-        referenceId: t._id,
-      });
-
-      // 2. Contra Move: Money received from Participant (Debit/Kharch) - ONLY if participant exists AND mirroring enabled
-      if (hasParty && t.toAccountId?.showMirrorInDailyMemo !== false) {
-        rows.push({
-          type: category || "deposit",
-          date: formatDateOnly(t.date),
-          name: displayName,
-          description: desc,
-          accountName: t.toAccountId?.name || "Manual",
-          amount: t.amount,
-          amountType: isBankDest ? "in" : "out",
-          isExternal,
-          referenceId: t._id,
-        });
-      }
-    } else if (["withdraw", "salary", "tax", "expense"].includes(type)) {
-      const isBankSource = t.fromAccountId?.type === "Bank";
-
-      // 1. Primary Move: Money leaves the Account (Debit/Kharch from Shop perspective)
-      rows.push({
-        type: category || type,
-        date: formatDateOnly(t.date),
-        name: t.fromAccountId?.name || "Account",
-        description: desc,
-        accountName: displayName || "Manual",
-        amount: t.amount,
-        amountType: "out", // Account pays = Kharch (Debit side)
-        isExternal,
-        referenceId: t._id,
-      });
-
-      // 2. Contra Move (Aamne-Samne): opposite side of the transaction
-      // Added check for showMirrorInDailyMemo to allow single-sided entries
-      const shouldContra = (hasParty || (isBankSource && displayName)) && t.fromAccountId?.showMirrorInDailyMemo !== false;
-      if (shouldContra) {
-        rows.push({
-          type: category || type,
-          date: formatDateOnly(t.date),
-          name: displayName,
-          description: desc,
-          accountName: t.fromAccountId?.name || "Manual",
-          amount: t.amount,
-          amountType: "in", // Recipient receives = Aamad (Credit side)
-          isExternal,
-          referenceId: t._id,
-        });
-      }
-    } else if (type === "transfer") {
-      const isPartyTransfer = t.customerId && (t.supplierId || t.mazdoorId);
-      const isAccountToPartyTransfer = t.fromAccountId && (t.supplierId || t.mazdoorId);
-
-      if (isPartyTransfer || isAccountToPartyTransfer) {
-        const sourceName = t.customerId?.name || t.fromAccountId?.name || "Source";
-        const recipientName = t.supplierId?.name || t.mazdoorId?.name || "Recipient";
-
-        // 1. Source Side (Credit / Aamad)
-        rows.push({
-          type: "transfer_in",
-          date: formatDateOnly(t.date),
-          name: `Direct Transfer to ${recipientName}`,
-          description: t.note || "Party-to-Party Transfer",
-          accountName: sourceName,
-          amount: t.amount,
-          amountType: "in",
-          isExternal: false, // Internal to the ledger ecosystem
-          referenceId: t._id
-        });
-
-        // 2. Destination Side (Debit / Kharch)
-        rows.push({
-          type: "transfer_out",
-          date: formatDateOnly(t.date),
-          name: `Direct Transfer from ${sourceName}`,
-          description: t.note || "Party-to-Party Transfer",
-          accountName: recipientName,
-          amount: t.amount,
-          amountType: "out",
-          isExternal: false,
-          referenceId: t._id
-        });
-      } else {
-        // Internal standard account-to-account transfers
-        // BUSINESS RULE: fromAccount = CREDIT (in), toAccount = DEBIT (out)
-        if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({ 
-            type: "transfer_out", 
-            date: formatDateOnly(t.date), 
-            name: t.fromAccountId?.name || "Account", 
-            description: `Transfer to ${t.toAccountId?.name || "—"}`, 
-            accountName: t.fromAccountId?.name || "Manual", 
-            amount: t.amount, 
-            amountType: "in", // fromAccount = CREDIT (in) per business rule
-            isExternal, 
-            referenceId: t._id 
-          });
-        }
-        if (t.toAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({ 
-            type: "transfer_in", 
-            date: formatDateOnly(t.date), 
-            name: t.toAccountId?.name || "Account", 
-            description: `Transfer from ${t.fromAccountId?.name || "—"}`, 
-            accountName: t.toAccountId?.name || "Manual", 
-            amount: t.amount, 
-            amountType: "out", // toAccount = DEBIT (out) per business rule
-            isExternal, 
-            referenceId: t._id 
-          });
-        }
-      }
-    }
-  });
-
-  // Calculate summary based on the actual rows displayed (Gross Turnover Logic)
-  const todayIn = rows.reduce((sum, r) => sum + (r.amountType === "in" ? r.amount : 0), 0);
-  const todayOut = rows.reduce((sum, r) => sum + (r.amountType === "out" ? r.amount : 0), 0);
-  // 3. Fetch Dasti Entries for the same period
+  // ====================== DASTI ENTRIES ======================
   const dastiEntries = await DailyDastiEntry.find({
     date: { $gte: fromDate, $lte: toDate },
-  })
-    .sort({ date: 1, createdAt: 1 })
-    .lean();
-res.set("Cache-Control", "no-store");
+  }).sort({ date: 1, createdAt: 1 }).lean();
+
+  // ====================== SUMMARY ======================
+  const totalIn = rows.reduce((sum, r) => sum + (r.amountType === "in" ? Number(r.amount) : 0), 0);
+  const totalOut = rows.reduce((sum, r) => sum + (r.amountType === "out" ? Number(r.amount) : 0), 0);
+
+  const closingBalance = openingBalance + totalIn - totalOut;
+
+  res.set("Cache-Control", "no-store");
   res.json({
     success: true,
     data: rows,
@@ -367,11 +312,11 @@ res.set("Cache-Control", "no-store");
       date: formatDateOnly(d.date),
     })),
     summary: {
-      openingBalance,
-      totalIn: todayIn,
-      totalOut: todayOut,
-      net: todayIn - todayOut,
-      closingBalance: openingBalance + todayIn - todayOut,
+      openingBalance: Math.round(openingBalance),
+      totalIn: Math.round(totalIn),
+      totalOut: Math.round(totalOut),
+      net: Math.round(totalIn - totalOut),
+      closingBalance: Math.round(closingBalance),
     },
   });
 };
