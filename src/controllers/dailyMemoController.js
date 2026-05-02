@@ -134,34 +134,69 @@ const buildLedgerRows = (transactions) => {
       const isPartyTransfer = t.customerId && (t.supplierId || t.mazdoorId);
       const isAccountToPartyTransfer = t.fromAccountId && (t.supplierId || t.mazdoorId);
 
-      if (isPartyTransfer || isAccountToPartyTransfer) {
-        const sourceName = t.customerId?.name || t.fromAccountId?.name || "Source";
-        const recipientName = t.supplierId?.name || t.mazdoorId?.name || "Recipient";
+    if (isPartyTransfer || isAccountToPartyTransfer) {
 
-        rows.push({
-          type: "transfer_in",
-          date: formatDateOnly(t.date),
-          name: `${recipientName}`,
-          description: t.note || "Party-to-Party Transfer",
-          accountName: sourceName,
-          amount: t.amount,
-          amountType: "in",
-          isExternal: false,
-          referenceId: t._id
-        });
+  const fromAcc = t.fromAccountId?.name || "Cash";
+  const toAcc = t.toAccountId?.name || "Cash";
 
-        rows.push({
-          type: "transfer_out",
-          date: formatDateOnly(t.date),
-          name: `${sourceName}`,
-          description: t.note || "Party-to-Party Transfer",
-          accountName: recipientName,
-          amount: t.amount,
-          amountType: "out",
-          isExternal: false,
-          referenceId: t._id
-        });
-      } else {
+  const customerName = t.customerId?.name;
+  const supplierName = t.supplierId?.name;
+  const mazdoorName = t.mazdoorId?.name;
+
+  // 🎯 Detect Giver & Receiver PROPERLY
+  let giver = "";
+  let receiver = "";
+
+  // Case 1: Customer → Supplier
+  if (customerName && supplierName) {
+    giver = customerName;
+    receiver = supplierName;
+  }
+
+  // Case 2: Account → Supplier/Mazdoor
+  else if (t.fromAccountId && (supplierName || mazdoorName)) {
+    giver = fromAcc;
+    receiver = supplierName || mazdoorName;
+  }
+
+  // Case 3: Supplier → Account (rare but possible)
+  else if (t.toAccountId && (supplierName || mazdoorName)) {
+    giver = supplierName || mazdoorName;
+    receiver = toAcc;
+  }
+
+  // Fallback
+  else {
+    giver = fromAcc;
+    receiver = toAcc;
+  }
+
+  // ✅ CREDIT (Receiver)
+  rows.push({
+    type: "transfer_in",
+    date: formatDateOnly(t.date),
+    name: giver,              // ✔ Always receiver
+    description: `${giver} → ${receiver}`,
+    accountName: receiver,          // ✔ From
+    amount: t.amount,
+    amountType: "in",
+    isExternal: false,
+    referenceId: t._id
+  });
+
+  // ✅ DEBIT (Giver)
+  rows.push({
+    type: "transfer_out",
+    date: formatDateOnly(t.date),
+    name: receiver,                 // ✔ Always giver
+    description: `${giver} → ${receiver}`,
+    accountName: giver,       // ✔ To
+    amount: t.amount,
+    amountType: "out",
+    isExternal: false,
+    referenceId: t._id
+  });
+} else {
         // Normal Account to Account Transfer
         if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
           rows.push({
