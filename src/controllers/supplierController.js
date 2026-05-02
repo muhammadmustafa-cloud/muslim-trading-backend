@@ -224,20 +224,64 @@ export const getHistory = async (req, res) => {
   });
 
   uniquePayments.forEach(p => {
-    // If withdraw (we paid them) -> Debit
-    // If deposit (they paid us - if linked) -> Credit
-    // If transfer: check if this supplier is the destination (receiver) -> Debit, else Credit
-    const isThisSupplierDest = p.type === 'transfer' && p.supplierId?.toString() === req.params.id;
-    const isDebit = p.type === 'withdraw' || isThisSupplierDest;
+    const supIdStr = req.params.id;
+    const amount = Number(p.amount) || 0;
+    if (!amount) return;
+
+    // Handle both populated objects and plain IDs
+    const pSupplierId = p.supplierId?._id?.toString?.() || p.supplierId?.toString?.();
+    const pCustomerId = p.customerId?._id?.toString?.() || p.customerId?.toString?.();
+
+    // Determine if this supplier is the receiver in a transfer
+    // Direct Party Transfer: customerId (Giver) -> supplierId (Receiver)
+    // Receiver = Debit (they received money)
+    const isSupplierReceiver = p.type === 'transfer' && pSupplierId === supIdStr;
+
+    // Determine debit/credit based on transaction type and role
+    let isDebit = false;
+    let isCredit = false;
+
+    if (p.type === 'withdraw') {
+      // We paid supplier directly from account -> Debit (they received)
+      isDebit = true;
+    }
+    else if (p.type === 'deposit') {
+      // Supplier paid us -> Credit (we received, reduces their payable)
+      // This is rare but can happen if linked customer deposits
+      isCredit = true;
+    }
+    else if (p.type === 'transfer') {
+      // Direct Party Transfer (Journal Entry)
+      if (isSupplierReceiver) {
+        // Supplier is Receiver = Debit (they got paid by customer)
+        isDebit = true;
+      } else if (pCustomerId === supIdStr) {
+        // Supplier is also a Customer (linked) and is Giver = Credit
+        isCredit = true;
+      } else if (pSupplierId === supIdStr) {
+        // Fallback: supplier is somehow involved as giver = Credit
+        isCredit = true;
+      }
+    }
+
+    // Ultimate fallback: if supplier is linked to this transaction and not classified yet
+    if (!isDebit && !isCredit && pSupplierId === supIdStr) {
+      // Default: assume receiver (Debit) for transfers involving this supplier
+      isDebit = p.type === 'transfer';
+      isCredit = !isDebit;
+    }
     
-    // Get proper name for payment source/recipient
+    // Get proper name for payment source/recipient (handle populated objects)
     const fromName = p.fromAccountId?.name || p.customerId?.name || p.supplierId?.name || 'Cash';
     const toName = p.toAccountId?.name || p.supplierId?.name || p.customerId?.name || 'Cash';
     
     // Build description with proper names
     let paymentDesc;
-    if (isDebit) {
-      // Payment paid TO someone
+    if (isDebit && isSupplierReceiver) {
+      // Direct Party Transfer: Customer -> Supplier
+      paymentDesc = `Payment Received from Customer (${fromName})`;
+    } else if (isDebit) {
+      // Regular payment paid TO supplier
       paymentDesc = `Payment Paid to ${toName}`;
     } else {
       // Payment received FROM someone

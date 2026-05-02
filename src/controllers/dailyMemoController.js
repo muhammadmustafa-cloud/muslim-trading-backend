@@ -141,7 +141,7 @@ const buildLedgerRows = (transactions) => {
         rows.push({
           type: "transfer_in",
           date: formatDateOnly(t.date),
-          name: `Direct Transfer to ${recipientName}`,
+          name: `${recipientName}`,
           description: t.note || "Party-to-Party Transfer",
           accountName: sourceName,
           amount: t.amount,
@@ -153,7 +153,7 @@ const buildLedgerRows = (transactions) => {
         rows.push({
           type: "transfer_out",
           date: formatDateOnly(t.date),
-          name: `Direct Transfer from ${sourceName}`,
+          name: `${sourceName}`,
           description: t.note || "Party-to-Party Transfer",
           accountName: recipientName,
           amount: t.amount,

@@ -212,7 +212,9 @@ export const getHistory = async (req, res) => {
   });
 
   // Transactions (Payments)
+  // Transactions (Payments)
   const allPayments = [...transactions, ...saleTransactions];
+  
   // Deduplicate by _id
   const seenPayments = new Set();
   const uniquePayments = allPayments.filter(p => {
@@ -222,37 +224,70 @@ export const getHistory = async (req, res) => {
   });
 
   uniquePayments.forEach(p => {
-    // If deposit to us (from customer) -> Credit
-    // If withdraw from us (to supplier/customer) -> Debit
-    // If transfer: check if this customer is the source (giver) -> Credit, else Debit
-    const isThisCustomerSource = p.type === 'transfer' && p.customerId?.toString() === req.params.id;
-    const isCredit = p.type === 'deposit' || isThisCustomerSource;
+    const custIdStr = req.params.id;
+    const amount = Number(p.amount) || 0;
     
-    // Get proper name for payment source/recipient
-    const fromName = p.fromAccountId?.name || p.customerId?.name || p.supplierId?.name || 'Cash';
-    const toName = p.toAccountId?.name || p.supplierId?.name || p.customerId?.name || 'Cash';
+    let isCredit = false;   // Money coming to customer (or customer receiving)
+    let isDebit = false;    // Money going out from customer (customer giving)
+
+    if (!amount) return; // skip zero amount
+
+    // ==================== MAIN LOGIC ====================
+    if (p.type === 'deposit') {
+      isCredit = true;
+    } 
+    else if (p.type === 'withdraw' || p.type === 'withdrawal') {
+      // Withdraw from customer → Debit (money going out)
+      isDebit = true;
+    } 
+    else if (p.type === 'transfer') {
+      
+      const isCustomerGiver = 
+        (p.customerId && p.customerId._id?.toString() === custIdStr) ||
+        (p.customerId?.toString() === custIdStr) ||
+        (p.fromAccountId && String(p.fromAccountId._id || p.fromAccountId) === custIdStr);
+
+      const isCustomerRecipient = 
+        (p.supplierId && p.supplierId._id?.toString() === custIdStr) ||  // rare
+        (p.toAccountId && String(p.toAccountId._id || p.toAccountId) === custIdStr);
+
+      if (isCustomerGiver) {
+        isCredit = true;     // Giver = Credit (as per your rule)
+      } else if (isCustomerRecipient) {
+        isDebit = true;
+      } 
+      else if (p.customerId) {
+        // Fallback: if only customerId is set in transfer → treat as giver
+        isCredit = true;
+      }
+    }
+
+    // Ultimate fallback (very important)
+    if (!isCredit && !isDebit) {
+      // If transaction has customerId and it's this customer → assume Credit (Giver)
+      if (p.customerId && 
+          (p.customerId._id?.toString() === custIdStr || p.customerId.toString() === custIdStr)) {
+        isCredit = true;
+      }
+    }
+
+    // Description
+    let paymentDesc = p.note ? `${p.note} ` : '';
     
-    // Build description with proper names
-    let paymentDesc;
     if (isCredit) {
-      // Payment received FROM someone
-      paymentDesc = `Payment Received from ${fromName}`;
+      const fromName = p.fromAccountId?.name || p.supplierId?.name || 'Party';
+      paymentDesc += `Payment Received from ${fromName}`;
     } else {
-      // Payment paid TO someone
-      paymentDesc = `Payment Paid to ${toName}`;
+      const toName = p.toAccountId?.name || p.supplierId?.name || 'Party';
+      paymentDesc += `Payment Paid to ${toName}`;
     }
-    
-    // Add note if exists
-    if (p.note) {
-      paymentDesc += ` (${p.note})`;
-    }
-    
+
     ledger.push({
       date: p.date,
-      description: paymentDesc,
+      description: paymentDesc.trim() || 'Transaction',
       bags: 0,
-      debit: isCredit ? 0 : p.amount,
-      credit: isCredit ? p.amount : 0,
+      debit: isDebit ? amount : 0,
+      credit: isCredit ? amount : 0,
       type: 'payment',
       refId: p._id
     });
