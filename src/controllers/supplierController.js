@@ -276,22 +276,35 @@ export const getHistory = async (req, res) => {
     const toName = p.toAccountId?.name || p.supplierId?.name || p.customerId?.name || 'Cash';
     
     // Build description with proper names
-    let paymentDesc;
-    if (isDebit && isSupplierReceiver) {
-      // Direct Party Transfer: Customer -> Supplier
-      paymentDesc = `Payment Received from Customer (${fromName})`;
-    } else if (isDebit) {
-      // Regular payment paid TO supplier
-      paymentDesc = `Payment Paid to ${toName}`;
-    } else {
-      // Payment received FROM someone
-      paymentDesc = `Payment Received from ${fromName}`;
-    }
-    
-    // Add note if exists
-    if (p.note) {
-      paymentDesc += ` (${p.note})`;
-    }
+const fromAccount = p.fromAccountId?.name;
+const toAccount = p.toAccountId?.name;
+const customerName = p.customerId?.name;
+const supplierName = p.supplierId?.name;
+
+// Build clean description
+let paymentDesc = '';
+
+if (p.type === 'withdraw') {
+  // We paid supplier from account
+  paymentDesc = `Paid to ${supplierName || 'Supplier'} via ${fromAccount || 'Cash'}`;
+}
+else if (p.type === 'deposit') {
+  // Received from supplier/customer into account
+  paymentDesc = `Received from ${customerName || supplierName || 'Party'} via ${toAccount || 'Cash'}`;
+}
+else if (p.type === 'transfer') {
+  if (isSupplierReceiver) {
+    // Customer → Supplier
+    paymentDesc = `Received from ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+  } else {
+    paymentDesc = `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+  }
+}
+
+// Add note if exists
+if (p.note) {
+  paymentDesc += ` (${p.note})`;
+}
     
     ledger.push({
       date: p.date,

@@ -122,7 +122,7 @@ export const getHistory = async (req, res) => {
   if (stockMatch && hasDateFilter) stockMatch.date = dateFilter;
 
   // Unified Transaction match: Check both customer and linked supplier IDs
-  const transMatch = { 
+  const transMatch = {
     $or: [{ customerId: custId }]
   };
   if (supId) {
@@ -148,9 +148,9 @@ export const getHistory = async (req, res) => {
   if (saleIds.length > 0) {
     // Only fetch those that aren't already in the transactions list
     const existingTransIds = transactions.map(t => t._id.toString());
-    saleTransactions = await Transaction.find({ 
-      saleId: { $in: saleIds }, 
-      _id: { $nin: existingTransIds.map(id => new mongoose.Types.ObjectId(id)) } 
+    saleTransactions = await Transaction.find({
+      saleId: { $in: saleIds },
+      _id: { $nin: existingTransIds.map(id => new mongoose.Types.ObjectId(id)) }
     }).lean();
   }
 
@@ -171,7 +171,7 @@ export const getHistory = async (req, res) => {
 
   // Sales (Dr for customer)
   sales.forEach(s => {
-    const itemNames = (s.items && s.items.length > 0) 
+    const itemNames = (s.items && s.items.length > 0)
       ? s.items.map(it => it.itemId?.name || 'Item').join(', ')
       : (s.itemId?.name || 'Item');
 
@@ -214,7 +214,7 @@ export const getHistory = async (req, res) => {
   // Transactions (Payments)
   // Transactions (Payments)
   const allPayments = [...transactions, ...saleTransactions];
-  
+
   // Deduplicate by _id
   const seenPayments = new Set();
   const uniquePayments = allPayments.filter(p => {
@@ -226,7 +226,7 @@ export const getHistory = async (req, res) => {
   uniquePayments.forEach(p => {
     const custIdStr = req.params.id;
     const amount = Number(p.amount) || 0;
-    
+
     let isCredit = false;   // Money coming to customer (or customer receiving)
     let isDebit = false;    // Money going out from customer (customer giving)
 
@@ -235,19 +235,19 @@ export const getHistory = async (req, res) => {
     // ==================== MAIN LOGIC ====================
     if (p.type === 'deposit') {
       isCredit = true;
-    } 
+    }
     else if (p.type === 'withdraw' || p.type === 'withdrawal') {
       // Withdraw from customer → Debit (money going out)
       isDebit = true;
-    } 
+    }
     else if (p.type === 'transfer') {
-      
-      const isCustomerGiver = 
+
+      const isCustomerGiver =
         (p.customerId && p.customerId._id?.toString() === custIdStr) ||
         (p.customerId?.toString() === custIdStr) ||
         (p.fromAccountId && String(p.fromAccountId._id || p.fromAccountId) === custIdStr);
 
-      const isCustomerRecipient = 
+      const isCustomerRecipient =
         (p.supplierId && p.supplierId._id?.toString() === custIdStr) ||  // rare
         (p.toAccountId && String(p.toAccountId._id || p.toAccountId) === custIdStr);
 
@@ -255,7 +255,7 @@ export const getHistory = async (req, res) => {
         isCredit = true;     // Giver = Credit (as per your rule)
       } else if (isCustomerRecipient) {
         isDebit = true;
-      } 
+      }
       else if (p.customerId) {
         // Fallback: if only customerId is set in transfer → treat as giver
         isCredit = true;
@@ -265,21 +265,52 @@ export const getHistory = async (req, res) => {
     // Ultimate fallback (very important)
     if (!isCredit && !isDebit) {
       // If transaction has customerId and it's this customer → assume Credit (Giver)
-      if (p.customerId && 
-          (p.customerId._id?.toString() === custIdStr || p.customerId.toString() === custIdStr)) {
+      if (p.customerId &&
+        (p.customerId._id?.toString() === custIdStr || p.customerId.toString() === custIdStr)) {
         isCredit = true;
       }
     }
 
     // Description
     let paymentDesc = p.note ? `${p.note} ` : '';
-    
-    if (isCredit) {
-      const fromName = p.fromAccountId?.name || p.supplierId?.name || 'Party';
-      paymentDesc += `Payment Received from ${fromName}`;
-    } else {
-      const toName = p.toAccountId?.name || p.supplierId?.name || 'Party';
-      paymentDesc += `Payment Paid to ${toName}`;
+
+    const fromAccount = p.fromAccountId?.name;
+    const toAccount = p.toAccountId?.name;
+    const supplierName = p.supplierId?.name;
+    const customerName = p.customerId?.name;
+
+    // Build clean description
+    // let paymentDesc = '';
+
+    if (p.type === 'deposit') {
+      // Customer ne paisa diya (we received)
+      paymentDesc = `Received from ${customerName || supplierName || 'Party'} via ${toAccount || 'Cash'}`;
+    }
+    else if (p.type === 'withdraw' || p.type === 'withdrawal') {
+      // Customer ko paisa diya
+      paymentDesc = `Paid to ${customerName || supplierName || 'Party'} via ${fromAccount || 'Cash'}`;
+    }
+    else if (p.type === 'transfer') {
+
+      const isCustomerGiver = isCredit;   // tumhari existing logic use ho rahi hai
+      const isCustomerReceiver = isDebit;
+
+      if (isCustomerGiver) {
+        // Customer → kisi ko payment
+        paymentDesc = `Paid by ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+      }
+      else if (isCustomerReceiver) {
+        // Customer ko kisi ne payment diya
+        paymentDesc = `Received by ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+      }
+      else {
+        paymentDesc = `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+      }
+    }
+
+    // Note add karo
+    if (p.note) {
+      paymentDesc += ` (${p.note})`;
     }
 
     ledger.push({
@@ -297,7 +328,7 @@ export const getHistory = async (req, res) => {
   ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   // 5. Calculate Running Balance
-   let currentBalance = 0;
+  let currentBalance = 0;
   ledger.forEach(item => {
     currentBalance += (item.debit - item.credit);
     item.balance = currentBalance;
@@ -326,15 +357,15 @@ export const remove = async (req, res) => {
   if (!customer) {
     return res.status(404).json({ success: false, message: 'Customer not found' });
   }
-  
+
   // If linked to supplier, unlink
   if (customer.linkedSupplierId) {
-    await Supplier.findByIdAndUpdate(customer.linkedSupplierId, { 
-      isAlsoCustomer: false, 
-      linkedCustomerId: null 
+    await Supplier.findByIdAndUpdate(customer.linkedSupplierId, {
+      isAlsoCustomer: false,
+      linkedCustomerId: null
     });
   }
-  
+
   await Customer.findByIdAndDelete(req.params.id);
   res.json({ success: true, message: 'Customer deleted successfully' });
 };
