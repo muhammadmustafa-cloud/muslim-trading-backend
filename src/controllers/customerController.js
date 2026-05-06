@@ -212,7 +212,6 @@ export const getHistory = async (req, res) => {
   });
 
   // Transactions (Payments)
-  // Transactions (Payments)
   const allPayments = [...transactions, ...saleTransactions];
 
   // Deduplicate by _id
@@ -225,10 +224,11 @@ export const getHistory = async (req, res) => {
 
   uniquePayments.forEach(p => {
     const custIdStr = req.params.id;
+    const linkedSupIdStr = supId ? supId.toString() : null;
     const amount = Number(p.amount) || 0;
 
-    let isCredit = false;   // Money coming to customer (or customer receiving)
-    let isDebit = false;    // Money going out from customer (customer giving)
+    let isCredit = false;
+    let isDebit = false;
 
     if (!amount) return; // skip zero amount
 
@@ -237,78 +237,63 @@ export const getHistory = async (req, res) => {
       isCredit = true;
     }
     else if (p.type === 'withdraw' || p.type === 'withdrawal') {
-      // Withdraw from customer → Debit (money going out)
       isDebit = true;
     }
     else if (p.type === 'transfer') {
-
+      // --- FIX: use linkedSupIdStr to correctly detect recipient via supplier side ---
       const isCustomerGiver =
         (p.customerId && p.customerId._id?.toString() === custIdStr) ||
         (p.customerId?.toString() === custIdStr) ||
         (p.fromAccountId && String(p.fromAccountId._id || p.fromAccountId) === custIdStr);
 
       const isCustomerRecipient =
-        (p.supplierId && p.supplierId._id?.toString() === custIdStr) ||  // rare
+        (linkedSupIdStr && p.supplierId && p.supplierId._id?.toString() === linkedSupIdStr) ||
         (p.toAccountId && String(p.toAccountId._id || p.toAccountId) === custIdStr);
 
       if (isCustomerGiver) {
-        isCredit = true;     // Giver = Credit (as per your rule)
+        isCredit = true;
       } else if (isCustomerRecipient) {
         isDebit = true;
-      }
-      else if (p.customerId) {
+      } else if (p.customerId) {
         // Fallback: if only customerId is set in transfer → treat as giver
         isCredit = true;
       }
     }
 
-    // Ultimate fallback (very important)
+    // Ultimate fallback
     if (!isCredit && !isDebit) {
-      // If transaction has customerId and it's this customer → assume Credit (Giver)
       if (p.customerId &&
         (p.customerId._id?.toString() === custIdStr || p.customerId.toString() === custIdStr)) {
         isCredit = true;
       }
     }
 
-    // Description
-    let paymentDesc = p.note ? `${p.note} ` : '';
-
+    // ==================== DESCRIPTION ====================
     const fromAccount = p.fromAccountId?.name;
     const toAccount = p.toAccountId?.name;
     const supplierName = p.supplierId?.name;
     const customerName = p.customerId?.name;
 
-    // Build clean description
-    // let paymentDesc = '';
+    let paymentDesc = '';
 
     if (p.type === 'deposit') {
-      // Customer ne paisa diya (we received)
       paymentDesc = `Received from ${customerName || supplierName || 'Party'} via ${toAccount || 'Cash'}`;
     }
     else if (p.type === 'withdraw' || p.type === 'withdrawal') {
-      // Customer ko paisa diya
       paymentDesc = `Paid to ${customerName || supplierName || 'Party'} via ${fromAccount || 'Cash'}`;
     }
     else if (p.type === 'transfer') {
-
-      const isCustomerGiver = isCredit;   // tumhari existing logic use ho rahi hai
-      const isCustomerReceiver = isDebit;
-
-      if (isCustomerGiver) {
-        // Customer → kisi ko payment
+      if (isCredit) {
+        // isCredit = isCustomerGiver → Customer ne kisi ko payment diya
         paymentDesc = `Paid by ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
-      }
-      else if (isCustomerReceiver) {
-        // Customer ko kisi ne payment diya
-        paymentDesc = `Received by ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
-      }
-      else {
+      } else if (isDebit) {
+        // isDebit = isCustomerRecipient → Customer ko kisi ne payment diya
+        paymentDesc = `Received by ${customerName || supplierName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+      } else {
         paymentDesc = `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
       }
     }
 
-    // Note add karo
     if (p.note) {
       paymentDesc += ` (${p.note})`;
     }
@@ -338,7 +323,7 @@ export const getHistory = async (req, res) => {
     success: true,
     data: {
       name: customer.name,
-      ledger: ledger, // Show oldest first (ascending)
+      ledger: ledger,
       summary: {
         totalDebit: ledger.reduce((sum, i) => sum + i.debit, 0),
         totalCredit: ledger.reduce((sum, i) => sum + i.credit, 0),
@@ -348,9 +333,6 @@ export const getHistory = async (req, res) => {
   });
 };
 
-/**
- * Returns customers with outstanding receivables (unpaid/partial sales), grouped by customer.
- */
 export const remove = async (req, res) => {
   const { Customer, Supplier } = req.models;
   const customer = await Customer.findById(req.params.id);
@@ -358,7 +340,6 @@ export const remove = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Customer not found' });
   }
 
-  // If linked to supplier, unlink
   if (customer.linkedSupplierId) {
     await Supplier.findByIdAndUpdate(customer.linkedSupplierId, {
       isAlsoCustomer: false,
