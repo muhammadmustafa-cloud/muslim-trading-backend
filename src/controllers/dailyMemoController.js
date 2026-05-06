@@ -248,18 +248,23 @@ export const getDailyMemo = async (req, res) => {
 
   // 1. Base Opening Balance (from Account/Customer/Supplier/Mazdoor)
   let baseOpeningBalance = 0;
+  let partyNameForFilter = ""; // Store party name for row filtering
   if (accountId) {
     const acc = await Account.findById(accountId).lean();
     baseOpeningBalance = acc?.openingBalance || 0;
+    partyNameForFilter = acc?.name || "";
   } else if (customerId) {
     const cust = await Customer.findById(customerId).lean();
     baseOpeningBalance = cust?.openingBalance || 0;
+    partyNameForFilter = cust?.name || "";
   } else if (supplierId) {
     const sup = await Supplier.findById(supplierId).lean();
     baseOpeningBalance = sup?.openingBalance || 0;
+    partyNameForFilter = sup?.name || "";
   } else if (mazdoorId) {
     const maz = await Mazdoor.findById(mazdoorId).lean();
     baseOpeningBalance = maz?.openingBalance || 0;
+    partyNameForFilter = maz?.name || "";
   } else {
     const allMillAccs = await Account.find({ $or: [{ isDailyKhata: true }, { isMillKhata: true }] }).lean();
     baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
@@ -289,7 +294,13 @@ export const getDailyMemo = async (req, res) => {
     .populate("mazdoorId", "name")
     .lean();
 
-  const prevRows = buildLedgerRows(prevTransactions);
+  let prevRows = buildLedgerRows(prevTransactions);
+
+  // Filter prevRows for party-specific ledgers
+  // Only include rows where the party is actually the 'name' in that row
+  if ((customerId || supplierId || mazdoorId) && partyNameForFilter) {
+    prevRows = prevRows.filter(r => r.name === partyNameForFilter);
+  }
 
   const historicalIn = prevRows.reduce((sum, r) => sum + (r.amountType === "in" ? Number(r.amount) : 0), 0);
   const historicalOut = prevRows.reduce((sum, r) => sum + (r.amountType === "out" ? Number(r.amount) : 0), 0);
@@ -325,7 +336,15 @@ export const getDailyMemo = async (req, res) => {
     .sort({ date: 1, createdAt: 1 })
     .lean();
 
-  const rows = buildLedgerRows(transactions);
+  let rows = buildLedgerRows(transactions);
+
+  // Filter rows for party-specific ledgers (customer/supplier/mazdoor)
+  // Only include rows where the party is actually the 'name' in that row
+  // This fixes the issue where party transfers create both giver and receiver rows,
+  // but we only want the row relevant to the queried party
+  if ((customerId || supplierId || mazdoorId) && partyNameForFilter) {
+    rows = rows.filter(r => r.name === partyNameForFilter);
+  }
 
   // ====================== DASTI ENTRIES ======================
   const dastiEntries = await DailyDastiEntry.find({
