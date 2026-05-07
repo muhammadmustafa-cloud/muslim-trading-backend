@@ -24,9 +24,11 @@ import auditRoutes from './auditRoutes.js';
 import userRoutes from './userRoutes.js';
 import rawMaterialHeadRoutes from './rawMaterialHeadRoutes.js';
 import migrationRoutes from './migrationRoutes.js';
+import partyLedgerRoutes from './partyLedgerRoutes.js';
 
 const router = Router();
 
+router.use('/party-ledger', partyLedgerRoutes);
 router.use('/customers', customerRoutes);
 router.use('/suppliers', supplierRoutes);
 router.use('/mazdoor', mazdoorRoutes);
