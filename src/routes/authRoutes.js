@@ -7,5 +7,6 @@ const router = Router();
 
 router.post('/login', asyncHandler(authController.login));
 router.get('/profile', protect, asyncHandler(authController.getProfile));
+router.put('/change-password', protect, asyncHandler(authController.changePassword));
 
 export default router;
