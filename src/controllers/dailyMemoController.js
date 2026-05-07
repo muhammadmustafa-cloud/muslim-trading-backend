@@ -198,32 +198,33 @@ const buildLedgerRows = (transactions) => {
   });
 } else {
         // Normal Account to Account Transfer
-        if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({
-            type: "transfer_out",
-            date: formatDateOnly(t.date),
-            name: t.fromAccountId?.name || "Account",
-            description: `Transfer to ${t.toAccountId?.name || "—"}`,
-            accountName: t.fromAccountId?.name || "Manual",
-            amount: t.amount,
-            amountType: "in",           // From = Credit (in)
-            isExternal: false,
-            referenceId: t._id
-          });
-        }
-        if (t.toAccountId?.showMirrorInDailyMemo !== false) {
-          rows.push({
-            type: "transfer_in",
-            date: formatDateOnly(t.date),
-            name: t.toAccountId?.name || "Account",
-            description: `Transfer from ${t.fromAccountId?.name || "—"}`,
-            accountName: t.toAccountId?.name || "Manual",
-            amount: t.amount,
-            amountType: "out",          // To = Debit (out)
-            isExternal: false,
-            referenceId: t._id
-          });
-        }
+        // Normal Account to Account Transfer — CORRECTED
+if (t.fromAccountId?.showMirrorInDailyMemo !== false) {
+  rows.push({
+    type: "transfer_out",
+    date: formatDateOnly(t.date),
+    name: t.toAccountId?.name || "Account",       // paisa kahan gaya
+    description: `Transfer to ${t.toAccountId?.name || "—"}`,
+    accountName: t.fromAccountId?.name || "Manual",
+    amount: t.amount,
+    amountType: "out",   // ✅ FROM = paisa nikla = DEBIT
+    isExternal: false,
+    referenceId: t._id
+  });
+}
+if (t.toAccountId?.showMirrorInDailyMemo !== false) {
+  rows.push({
+    type: "transfer_in",
+    date: formatDateOnly(t.date),
+    name: t.fromAccountId?.name || "Account",     // paisa kahan se aya
+    description: `Transfer from ${t.fromAccountId?.name || "—"}`,
+    accountName: t.toAccountId?.name || "Manual",
+    amount: t.amount,
+    amountType: "in",    // ✅ TO = paisa aya = CREDIT
+    isExternal: false,
+    referenceId: t._id
+  });
+}
       }
     }
   });
