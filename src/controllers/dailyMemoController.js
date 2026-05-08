@@ -103,9 +103,9 @@ const buildLedgerRows = (transactions) => {
       rows.push({
         type: category || type,
         date: formatDateOnly(t.date),
-        name: displayName || "Manual",
+        name: t.fromAccountId?.name || "Manual",
         description: desc,
-        accountName: t.fromAccountId?.name || "Account",
+        accountName: displayName || "Account",
         amount: t.amount,
         amountType: "out",
         isExternal: !isInternalTransfer,
@@ -120,9 +120,9 @@ const buildLedgerRows = (transactions) => {
         rows.push({
           type: category || type,
           date: formatDateOnly(t.date),
-          name: t.fromAccountId?.name,
+          name: displayName,
           description: desc,
-          accountName: displayName || "Manual",
+          accountName: t.fromAccountId?.name || "Manual",
           amount: t.amount,
           amountType: "in",
           isExternal: !isInternalTransfer,
