@@ -60,6 +60,11 @@ export const create = async (req, res) => {
   const cutTotal = Number(totalSHCut) || 0;
   const netTotal = Math.max(0, grossTotal - cutTotal);
 
+  const bardanaAmount = Number(totalBardanaAmount) || 0;
+  const mazdoriAmount = Number(totalMazdori) || 0;
+  const parsedExtras = Number(extras) || 0;
+  const totalMun = netTotal / 40;
+
   let grandTotalAmount = 0;
   
   // Process each item - simplified approach
@@ -100,11 +105,6 @@ export const create = async (req, res) => {
     }
 
     // Distribute Extras, Bardana and Mazdoori per MUN (like Sales system)
-    const bardanaAmount = Number(totalBardanaAmount) || 0;
-    const mazdoriAmount = Number(totalMazdori) || 0;
-    const parsedExtras = Number(extras) || 0;
-    const totalMun = netTotal / 40;
-    
     const extraPerMun = totalMun > 0 ? parsedExtras / totalMun : 0;
     const bardanaPerMun = totalMun > 0 ? bardanaAmount / totalMun : 0;
     const mazdoriPerMun = totalMun > 0 ? mazdoriAmount / totalMun : 0;
@@ -304,9 +304,11 @@ export const update = async (req, res) => {
 
   if (extras !== undefined) entry.extras = Number(extras) || 0;
 
-  // Recalculate true total amount factoring in extras, bardana, and mazdori
-  // currentGrandTotal already includes bardana/mazdori/extras from per-item distribution
-  entry.amount = Math.max(0, currentGrandTotal);
+  if (items && Array.isArray(items)) {
+    // Recalculate true total amount factoring in extras, bardana, and mazdori
+    // grandTotalAmount already includes bardana/mazdori/extras from per-item distribution
+    entry.amount = Math.max(0, grandTotalAmount);
+  }
 
   if (amountPaid != null) entry.amountPaid = Number(amountPaid);
 
