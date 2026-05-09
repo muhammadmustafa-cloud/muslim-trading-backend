@@ -284,7 +284,6 @@ export const update = async (req, res) => {
       const lineTotal = Math.round(lineTotalBase + itemBardana + itemMazdori - itemExtra);
       
       grandTotalAmount += lineTotal;
-
       return {
         itemId: item.itemId,
         kattay: Number(item.kattay) || 0,
@@ -300,11 +299,6 @@ export const update = async (req, res) => {
         amount: lineTotal
       };
     });
-  }
-
-  if (extras !== undefined) entry.extras = Number(extras) || 0;
-
-  if (items && Array.isArray(items)) {
     // Recalculate true total amount factoring in extras, bardana, and mazdori
     // grandTotalAmount already includes bardana/mazdori/extras from per-item distribution
     entry.amount = Math.max(0, grandTotalAmount);
