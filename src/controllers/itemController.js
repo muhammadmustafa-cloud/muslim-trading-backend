@@ -8,9 +8,14 @@ export const list = async (req, res) => {
   const { Item } = req.models;
   const search = (req.query.search || '').trim();
   const categoryId = (req.query.categoryId || '').trim();
+  const parentId = (req.query.parentId || '').trim();
   const filter = {};
   if (search) filter.name = new RegExp(search, 'i');
   if (categoryId) filter.categoryId = new mongoose.Types.ObjectId(categoryId);
+  if (parentId) {
+    if (parentId === 'none') filter.parentId = null;
+    else filter.parentId = new mongoose.Types.ObjectId(parentId);
+  }
   const items = await Item.find(filter).populate(itemListPopulate).sort({ name: 1 }).lean();
   res.json({ success: true, data: items });
 };
@@ -26,7 +31,7 @@ export const getById = async (req, res) => {
 
 export const create = async (req, res) => {
   const { Item } = req.models;
-  const { name, categoryId, quality } = req.body;
+  const { name, categoryId, quality, parentId } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Name is required' });
   }
@@ -34,6 +39,7 @@ export const create = async (req, res) => {
     name: name.trim(),
     categoryId: categoryId || null,
     quality: (quality || '').trim(),
+    parentId: parentId || null,
   });
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.status(201).json({ success: true, data: populated });
@@ -41,7 +47,7 @@ export const create = async (req, res) => {
 
 export const update = async (req, res) => {
   const { Item } = req.models;
-  const { name, categoryId, quality } = req.body;
+  const { name, categoryId, quality, parentId } = req.body;
   const item = await Item.findById(req.params.id);
   if (!item) {
     return res.status(404).json({ success: false, message: 'Item not found' });
@@ -53,6 +59,7 @@ export const update = async (req, res) => {
   }
   if (categoryId !== undefined) item.categoryId = categoryId || null;
   if (quality !== undefined) item.quality = (quality || '').trim();
+  if (parentId !== undefined) item.parentId = parentId || null;
   await item.save();
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.json({ success: true, data: populated });
@@ -218,3 +225,126 @@ export const getKhata = async (req, res) => {
     },
   });
 };
+
+/**
+ * Sub-item ledger: only sales for this specific subItemId.
+ */
+export const getSubItemKhata = async (req, res) => {
+  const { Item, Sale } = req.models;
+  const item = await Item.findById(req.params.id).populate('parentId').lean();
+  if (!item) {
+    return res.status(404).json({ success: false, message: 'Sub-item not found' });
+  }
+  
+  const { dateFrom, dateTo } = req.query;
+  const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
+  const dateFilter = dateFilterObj.date || {};
+  const hasDateFilter = Object.keys(dateFilter).length > 0;
+  const subItemId = new mongoose.Types.ObjectId(req.params.id);
+
+  const salesRaw = await Sale.aggregate([
+    { $unwind: '$items' },
+    { $match: { 'items.subItemId': subItemId, ...(hasDateFilter ? { date: dateFilter } : {}) } },
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customerId',
+        foreignField: '_id',
+        as: 'customerDoc'
+      }
+    },
+    { $unwind: { path: '$customerDoc', preserveNullAndEmptyArrays: true } },
+    { $sort: { date: -1 } }
+  ]);
+
+  const sales = salesRaw.map(s => {
+    const itm = s.items;
+    return {
+      _id: s._id,
+      date: s.date,
+      customerId: s.customerDoc ? { _id: s.customerDoc._id, name: s.customerDoc.name } : null,
+      truckNumber: s.truckNumber,
+      kattay: itm.kattay || 0,
+      quantity: itm.quantity || 0,
+      rate: itm.rate || 0,
+      totalAmount: itm.totalAmount || 0,
+      itemName: item.name,
+      parentName: item.parentId ? item.parentId.name : '—'
+    };
+  });
+
+  const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+  const totalBagsSold = sales.reduce((sum, s) => sum + (Number(s.kattay) || 0), 0);
+  const totalWeightSold = sales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+  const totalMunSold = totalWeightSold / 40;
+
+  res.json({
+    success: true,
+    data: {
+      name: item.name,
+      parentName: item.parentId ? item.parentId.name : '—',
+      totalRevenue,
+      totalBagsSold,
+      totalMunSold,
+      sales
+    }
+  });
+};
+
+export const getSubItemsSalesSummary = async (req, res) => {
+  const { Item, Sale } = req.models;
+  const mainItemId = req.params.id;
+  const { dateFrom, dateTo } = req.query;
+
+  // 1. Find all sub-items linked to this main item
+  const subItems = await Item.find({ parentId: mainItemId }).lean();
+  if (!subItems.length) {
+    return res.json({ success: true, data: [] });
+  }
+
+  const subItemIds = subItems.map(si => si._id);
+
+  // 2. Date filtering
+  const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
+  const dateFilter = dateFilterObj.date || {};
+  const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+  // 3. Aggregate sales for these sub-items
+  const salesSummary = await Sale.aggregate([
+    { $unwind: '$items' },
+    { 
+      $match: { 
+        'items.subItemId': { $in: subItemIds },
+        ...(hasDateFilter ? { date: dateFilter } : {})
+      } 
+    },
+    {
+      $group: {
+        _id: '$items.subItemId',
+        totalBags: { $sum: '$items.kattay' },
+        totalWeight: { $sum: '$items.quantity' },
+        totalRevenue: { $sum: '$items.totalAmount' },
+        saleCount: { $sum: 1 }
+      }
+    }
+  ]);
+
+  // 4. Merge with sub-item names
+  const result = subItems.map(si => {
+    const summary = salesSummary.find(s => s._id.toString() === si._id.toString());
+    return {
+      _id: si._id,
+      name: si.name,
+      quality: si.quality,
+      totalBags: summary ? summary.totalBags : 0,
+      totalWeight: summary ? summary.totalWeight : 0,
+      totalMun: summary ? (summary.totalWeight / 40) : 0,
+      totalRevenue: summary ? summary.totalRevenue : 0,
+      saleCount: summary ? summary.saleCount : 0
+    };
+  });
+
+  res.json({ success: true, data: result });
+};
+
+

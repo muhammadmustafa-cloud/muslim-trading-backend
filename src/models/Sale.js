@@ -23,7 +23,8 @@ export const saleSchema = new mongoose.Schema(
       mazdori: { type: Number, default: 0 },
       totalAmount: { type: Number, default: 0 },
       deductionKg: { type: Number, default: 0 },
-      addKg: { type: Number, default: 0 }
+      addKg: { type: Number, default: 0 },
+      subItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', default: null }
     }],
 
     truckNumber: { type: String, trim: true, default: '' },

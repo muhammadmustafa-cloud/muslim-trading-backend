@@ -147,7 +147,8 @@ export const create = async (req, res) => {
       shCut: lineSHCut,
       quantity: lineNet,
       rate,
-      totalAmount: lineTotal
+      totalAmount: lineTotal,
+      subItemId: item.subItemId || null
     };
   });
 
@@ -177,7 +178,8 @@ export const create = async (req, res) => {
       ...item,
       bardanaAmount: itemProportionalBardana,
       mazdori: itemProportionalMazdori,
-      totalAmount: adjustedLineTotal
+      totalAmount: adjustedLineTotal,
+      subItemId: item.subItemId
     };
   });
 
@@ -319,7 +321,8 @@ export const update = async (req, res) => {
         grossWeight: lineGross,
         quantity: lineNet,
         rate,
-        totalAmount: lineTotal
+        totalAmount: lineTotal,
+        subItemId: item.subItemId || null
       };
     });
 
@@ -345,7 +348,8 @@ export const update = async (req, res) => {
         ...item,
         bardanaAmount: itemProportionalBardana,
         mazdori: itemProportionalMazdori,
-        totalAmount: adjustedLineTotal
+        totalAmount: adjustedLineTotal,
+        subItemId: item.subItemId
       };
     });
 

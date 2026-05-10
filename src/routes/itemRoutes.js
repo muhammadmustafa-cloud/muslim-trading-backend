@@ -5,12 +5,12 @@ import { protect, superAdminOnly } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-router.use(protect);
-
-router.get('/', asyncHandler(itemController.list));
-router.get('/:id/khata', asyncHandler(itemController.getKhata));
-router.get('/:id', asyncHandler(itemController.getById));
-router.post('/', asyncHandler(itemController.create));
-router.put('/:id', superAdminOnly, asyncHandler(itemController.update));
+router.get('/', protect, asyncHandler(itemController.list));
+router.get('/:id/khata', protect, asyncHandler(itemController.getKhata));
+router.get('/:id/sub-khata', protect, asyncHandler(itemController.getSubItemKhata));
+router.get('/:id/sub-items-summary', protect, asyncHandler(itemController.getSubItemsSalesSummary));
+router.get('/:id', protect, asyncHandler(itemController.getById));
+router.post('/', protect, superAdminOnly, asyncHandler(itemController.create));
+router.put('/:id', protect, superAdminOnly, asyncHandler(itemController.update));
 
 export default router;

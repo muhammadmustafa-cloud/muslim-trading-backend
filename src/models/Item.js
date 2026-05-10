@@ -7,10 +7,10 @@ export const itemSchema = new mongoose.Schema(
     quality: { type: String, trim: true, default: '' },
     openingBags: { type: Number, default: 0 },
     openingWeight: { type: Number, default: 0 },
+    parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', default: null },
   },
   { timestamps: true }
 );
 
 export const getItemModel = (conn) => conn.model('Item', itemSchema);
 export default mongoose.model('Item', itemSchema);
-
