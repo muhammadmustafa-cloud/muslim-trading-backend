@@ -51,6 +51,7 @@ export const list = async (req, res) => {
   const sales = await Sale.find(filter)
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('accountId', 'name')
     .sort({ date: -1 })
     .lean();
@@ -70,6 +71,7 @@ export const getById = async (req, res) => {
   const sale = await Sale.findById(req.params.id)
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('accountId', 'name')
     .lean();
   if (!sale) {
@@ -410,6 +412,7 @@ export const update = async (req, res) => {
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('accountId', 'name')
     .lean();
   res.json({ success: true, data: populated });
