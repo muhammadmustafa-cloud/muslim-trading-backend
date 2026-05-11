@@ -6,6 +6,7 @@ export const customerSchema = new mongoose.Schema(
     phone: { type: String, trim: true, default: '' },
     address: { type: String, trim: true, default: '' },
     notes: { type: String, trim: true, default: '' },
+    isWarehouse: { type: Boolean, default: false },
     isAlsoSupplier: { type: Boolean, default: false },
     linkedSupplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
     openingBalance: { type: Number, default: 0 },

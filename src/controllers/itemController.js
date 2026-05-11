@@ -309,7 +309,7 @@ export const getSubItemsSalesSummary = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-  // 3. Aggregate sales for these sub-items
+  // 3. Aggregate sales for these sub-items with Customer lookup to identify Internal Transfers
   const salesSummary = await Sale.aggregate([
     { $unwind: '$items' },
     { 
@@ -319,12 +319,25 @@ export const getSubItemsSalesSummary = async (req, res) => {
       } 
     },
     {
+      $lookup: {
+        from: 'customers',
+        localField: 'customerId',
+        foreignField: '_id',
+        as: 'customerDoc'
+      }
+    },
+    { $unwind: '$customerDoc' },
+    {
       $group: {
         _id: '$items.subItemId',
-        totalBags: { $sum: '$items.kattay' },
-        totalWeight: { $sum: '$items.quantity' },
-        totalRevenue: { $sum: '$items.totalAmount' },
-        saleCount: { $sum: 1 }
+        // If customer is a warehouse, it's "In" for this sub-item
+        inWeight: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', true] }, '$items.quantity', 0] } },
+        inBags: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', true] }, '$items.kattay', 0] } },
+        // If customer is NOT a warehouse, it's "Out" (Sale) for this sub-item
+        outWeight: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.quantity', 0] } },
+        outBags: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.kattay', 0] } },
+        totalRevenue: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.totalAmount', 0] } },
+        saleCount: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, 1, 0] } }
       }
     }
   ]);
@@ -332,13 +345,22 @@ export const getSubItemsSalesSummary = async (req, res) => {
   // 4. Merge with sub-item names
   const result = subItems.map(si => {
     const summary = salesSummary.find(s => s._id.toString() === si._id.toString());
+    const inW = summary ? summary.inWeight : 0;
+    const outW = summary ? summary.outWeight : 0;
+    
     return {
       _id: si._id,
       name: si.name,
       quality: si.quality,
-      totalBags: summary ? summary.totalBags : 0,
-      totalWeight: summary ? summary.totalWeight : 0,
-      totalMun: summary ? (summary.totalWeight / 40) : 0,
+      inBags: summary ? summary.inBags : 0,
+      inWeight: inW,
+      inMun: inW / 40,
+      outBags: summary ? summary.outBags : 0,
+      outWeight: outW,
+      outMun: outW / 40,
+      balanceBags: (summary ? summary.inBags : 0) - (summary ? summary.outBags : 0),
+      balanceWeight: inW - outW,
+      balanceMun: (inW - outW) / 40,
       totalRevenue: summary ? summary.totalRevenue : 0,
       saleCount: summary ? summary.saleCount : 0
     };

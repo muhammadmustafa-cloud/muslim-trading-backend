@@ -10,15 +10,33 @@ async function getAvailableQuantity(models, itemId, subItemId = null, excludeSal
   const inMatch = { 'items.itemId': itemObjId };
   if (subItemObjId) inMatch['items.subItemId'] = subItemObjId;
 
-  const inResult = await StockEntry.aggregate([
+  const stockEntryIn = await StockEntry.aggregate([
     { $unwind: '$items' },
     { $match: inMatch },
     { $group: { _id: null, totalQty: { $sum: '$items.itemNetWeight' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
-  const stockInQty = inResult[0]?.totalQty ?? 0;
-  const stockInKattay = inResult[0]?.totalKattay ?? 0;
 
-  // Sum Out from Sale.items
+  // NEW: Sum In from Sales where Customer is a Warehouse (Internal Transfer)
+  const internalIn = await Sale.aggregate([
+    { $unwind: '$items' },
+    { $match: inMatch },
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customerId',
+        foreignField: '_id',
+        as: 'cust'
+      }
+    },
+    { $unwind: '$cust' },
+    { $match: { 'cust.isWarehouse': true } },
+    { $group: { _id: null, totalQty: { $sum: '$items.quantity' }, totalKattay: { $sum: '$items.kattay' } } },
+  ]);
+
+  const stockInQty = (stockEntryIn[0]?.totalQty ?? 0) + (internalIn[0]?.totalQty ?? 0);
+  const stockInKattay = (stockEntryIn[0]?.totalKattay ?? 0) + (internalIn[0]?.totalKattay ?? 0);
+
+  // Sum Out from Sale.items (Only real sales to non-warehouse customers)
   const saleMatch = { 'items.itemId': itemObjId };
   if (subItemObjId) saleMatch['items.subItemId'] = subItemObjId;
   if (excludeSaleId) saleMatch._id = { $ne: new mongoose.Types.ObjectId(excludeSaleId) };
@@ -26,6 +44,16 @@ async function getAvailableQuantity(models, itemId, subItemId = null, excludeSal
   const outResult = await Sale.aggregate([
     { $unwind: '$items' },
     { $match: saleMatch },
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customerId',
+        foreignField: '_id',
+        as: 'cust'
+      }
+    },
+    { $unwind: '$cust' },
+    { $match: { 'cust.isWarehouse': false } }, // Only count real party sales as "Out"
     { $group: { _id: null, totalQty: { $sum: '$items.quantity' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
   const stockOutQty = outResult[0]?.totalQty ?? 0;
