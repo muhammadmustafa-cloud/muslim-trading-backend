@@ -30,6 +30,7 @@ export const create = async (req, res) => {
     phone: (phone || '').trim(),
     address: (address || '').trim(),
     notes: (notes || '').trim(),
+    isWarehouse: !!req.body.isWarehouse,
     isAlsoSupplier: !!isAlsoSupplier,
     linkedSupplierId: linkedSupplierId || null,
     openingBalance: Number(openingBalance) || 0,
@@ -69,11 +70,11 @@ export const update = async (req, res) => {
     phone: (req.body.phone ?? customer.phone ?? '').toString().trim(),
     address: (req.body.address ?? customer.address ?? '').toString().trim(),
     notes: (req.body.notes ?? customer.notes ?? '').toString().trim(),
+    isWarehouse: req.body.isWarehouse !== undefined ? !!req.body.isWarehouse : customer.isWarehouse,
     isAlsoSupplier: isAlsoSupplier !== undefined ? !!isAlsoSupplier : customer.isAlsoSupplier,
     linkedSupplierId: linkedSupplierId !== undefined ? (linkedSupplierId || null) : customer.linkedSupplierId,
     openingBalance: req.body.openingBalance !== undefined ? Number(req.body.openingBalance) : customer.openingBalance,
   };
-  if (isAlsoSupplier && createLinkedSupplier && !updates.linkedSupplierId) {
     const supplier = await Supplier.create({
       name: updates.name,
       phone: updates.phone,
