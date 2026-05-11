@@ -1,14 +1,18 @@
 import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
-async function getAvailableQuantity(models, itemId, excludeSaleId = null) {
+async function getAvailableQuantity(models, itemId, subItemId = null, excludeSaleId = null) {
   const { StockEntry, Sale } = models;
   const itemObjId = new mongoose.Types.ObjectId(itemId);
+  const subItemObjId = subItemId ? new mongoose.Types.ObjectId(subItemId) : null;
   
   // Sum In from StockEntry.items
+  const inMatch = { 'items.itemId': itemObjId };
+  if (subItemObjId) inMatch['items.subItemId'] = subItemObjId;
+
   const inResult = await StockEntry.aggregate([
     { $unwind: '$items' },
-    { $match: { 'items.itemId': itemObjId } },
+    { $match: inMatch },
     { $group: { _id: null, totalQty: { $sum: '$items.itemNetWeight' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
   const stockInQty = inResult[0]?.totalQty ?? 0;
@@ -16,6 +20,7 @@ async function getAvailableQuantity(models, itemId, excludeSaleId = null) {
 
   // Sum Out from Sale.items
   const saleMatch = { 'items.itemId': itemObjId };
+  if (subItemObjId) saleMatch['items.subItemId'] = subItemObjId;
   if (excludeSaleId) saleMatch._id = { $ne: new mongoose.Types.ObjectId(excludeSaleId) };
   
   const outResult = await Sale.aggregate([
@@ -31,13 +36,12 @@ async function getAvailableQuantity(models, itemId, excludeSaleId = null) {
     availableKattay: Math.max(0, stockInKattay - stockOutKattay),
   };
 }
-
 export const getAvailable = async (req, res) => {
-  const { itemId, excludeSaleId } = req.query;
+  const { itemId, subItemId, excludeSaleId } = req.query;
   if (!itemId) {
     return res.status(400).json({ success: false, message: 'itemId required' });
   }
-  const { availableQty, availableKattay } = await getAvailableQuantity(req.models, itemId, excludeSaleId || null);
+  const { availableQty, availableKattay } = await getAvailableQuantity(req.models, itemId, subItemId || null, excludeSaleId || null);
   res.json({ success: true, data: { available: availableQty, availableWeight: availableQty, availableKattay } });
 };
 
@@ -220,10 +224,10 @@ export const create = async (req, res) => {
     paymentStatus,
     image: req.file ? req.file.filename : null,
   });
-
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('accountId', 'name')
     .lean();
 
