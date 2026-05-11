@@ -75,6 +75,7 @@ export const update = async (req, res) => {
     linkedSupplierId: linkedSupplierId !== undefined ? (linkedSupplierId || null) : customer.linkedSupplierId,
     openingBalance: req.body.openingBalance !== undefined ? Number(req.body.openingBalance) : customer.openingBalance,
   };
+  if (isAlsoSupplier && createLinkedSupplier && !updates.linkedSupplierId) {
     const supplier = await Supplier.create({
       name: updates.name,
       phone: updates.phone,
