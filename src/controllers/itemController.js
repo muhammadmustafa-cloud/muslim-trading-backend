@@ -290,31 +290,38 @@ export const getSubItemKhata = async (req, res) => {
     }
   });
 };
-
 export const getSubItemsSalesSummary = async (req, res) => {
   const { Item, Sale } = req.models;
   const mainItemId = req.params.id;
   const { dateFrom, dateTo } = req.query;
 
-  // 1. Find all sub-items linked to this main item
+  // 1. Find the main item and its sub-items
+  const mainItem = await Item.findById(mainItemId).lean();
+  if (!mainItem) return res.status(404).json({ success: false, message: 'Main Item not found' });
+
   const subItems = await Item.find({ parentId: mainItemId }).lean();
   if (!subItems.length) {
     return res.json({ success: true, data: [] });
   }
 
   const subItemIds = subItems.map(si => si._id);
+  const subItemNames = subItems.map(si => si.name.toLowerCase().trim());
 
   // 2. Date filtering
   const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-  // 3. Aggregate sales for these sub-items with Customer lookup to identify Internal Transfers
+  /**
+   * 3. Aggregate sales with "Smart Auto-Link" logic:
+   * We look for:
+   * a) Sales explicitly using a sub-item from our list.
+   * b) Sales of ANY item to a Warehouse Customer whose name matches this Main Item.
+   */
   const salesSummary = await Sale.aggregate([
     { $unwind: '$items' },
     { 
       $match: { 
-        'items.subItemId': { $in: subItemIds },
         ...(hasDateFilter ? { date: dateFilter } : {})
       } 
     },
@@ -328,41 +335,82 @@ export const getSubItemsSalesSummary = async (req, res) => {
     },
     { $unwind: '$customerDoc' },
     {
+      $lookup: {
+        from: 'items',
+        localField: 'items.itemId',
+        foreignField: '_id',
+        as: 'lineItemDoc'
+      }
+    },
+    { $unwind: '$lineItemDoc' },
+    {
+      // Smart Filter: Keep sales that belong to this warehouse
+      $match: {
+        $or: [
+          // Case A: Explicitly linked sub-item
+          { 'items.subItemId': { $in: subItemIds } },
+          // Case B: Sale of a Main Item to THIS Warehouse Customer (by name)
+          { 
+            'customerDoc.isWarehouse': true, 
+            'customerDoc.name': mainItem.name,
+            'lineItemDoc.name': { $in: subItems.map(si => si.name) } 
+          }
+        ]
+      }
+    },
+    {
       $group: {
-        _id: '$items.subItemId',
-        // If customer is a warehouse, it's "In" for this sub-item
+        _id: {
+          $cond: [
+            { $in: ['$items.subItemId', subItemIds] },
+            '$items.subItemId',
+            { $toLower: { $trim: { input: '$lineItemDoc.name' } } }
+          ]
+        },
         inWeight: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', true] }, '$items.quantity', 0] } },
         inBags: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', true] }, '$items.kattay', 0] } },
-        // If customer is NOT a warehouse, it's "Out" (Sale) for this sub-item
-        outWeight: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.quantity', 0] } },
-        outBags: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.kattay', 0] } },
-        totalRevenue: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, '$items.totalAmount', 0] } },
-        saleCount: { $sum: { $cond: [{ $eq: ['$customerDoc.isWarehouse', false] }, 1, 0] } }
+        outWeight: { $sum: { $cond: [{ $ne: ['$customerDoc.isWarehouse', true] }, '$items.quantity', 0] } },
+        outBags: { $sum: { $cond: [{ $ne: ['$customerDoc.isWarehouse', true] }, '$items.kattay', 0] } },
+        totalRevenue: { $sum: { $cond: [{ $ne: ['$customerDoc.isWarehouse', true] }, '$items.totalAmount', 0] } },
+        saleCount: { $sum: { $cond: [{ $ne: ['$customerDoc.isWarehouse', true] }, 1, 0] } }
       }
     }
   ]);
 
-  // 4. Merge with sub-item names
+  // 4. Merge with sub-item names (Summing multiple matches if any)
   const result = subItems.map(si => {
-    const summary = salesSummary.find(s => s._id.toString() === si._id.toString());
-    const inW = summary ? summary.inWeight : 0;
-    const outW = summary ? summary.outWeight : 0;
+    const matchingSummaries = salesSummary.filter(s => 
+      s._id.toString() === si._id.toString() || 
+      (typeof s._id === 'string' && s._id === si.name.toLowerCase().trim())
+    );
+
+    const merged = matchingSummaries.reduce((acc, curr) => ({
+      inWeight: acc.inWeight + curr.inWeight,
+      inBags: acc.inBags + curr.inBags,
+      outWeight: acc.outWeight + curr.outWeight,
+      outBags: acc.outBags + curr.outBags,
+      totalRevenue: acc.totalRevenue + curr.totalRevenue,
+      saleCount: acc.saleCount + curr.saleCount
+    }), { inWeight: 0, inBags: 0, outWeight: 0, outBags: 0, totalRevenue: 0, saleCount: 0 });
+
+    const inW = merged.inWeight;
+    const outW = merged.outWeight;
     
     return {
       _id: si._id,
       name: si.name,
       quality: si.quality,
-      inBags: summary ? summary.inBags : 0,
+      inBags: merged.inBags,
       inWeight: inW,
       inMun: inW / 40,
-      outBags: summary ? summary.outBags : 0,
+      outBags: merged.outBags,
       outWeight: outW,
       outMun: outW / 40,
-      balanceBags: (summary ? summary.inBags : 0) - (summary ? summary.outBags : 0),
+      balanceBags: merged.inBags - merged.outBags,
       balanceWeight: inW - outW,
       balanceMun: (inW - outW) / 40,
-      totalRevenue: summary ? summary.totalRevenue : 0,
-      saleCount: summary ? summary.saleCount : 0
+      totalRevenue: merged.totalRevenue,
+      saleCount: merged.saleCount
     };
   });
 

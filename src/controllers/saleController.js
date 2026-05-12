@@ -2,45 +2,77 @@ import mongoose from 'mongoose';
 import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
 
 async function getAvailableQuantity(models, itemId, subItemId = null, excludeSaleId = null) {
-  const { StockEntry, Sale } = models;
+  const { StockEntry, Sale, Item, Customer } = models;
   const itemObjId = new mongoose.Types.ObjectId(itemId);
   const subItemObjId = subItemId ? new mongoose.Types.ObjectId(subItemId) : null;
-  
-  // Sum In from StockEntry.items
+
+  let subItemDoc = null;
+  let parentItemDoc = null;
+  let warehouseCustomerIds = [];
+
+  // If we are checking for a specific sub-item, find its name and parent for "Smart Matching"
+  if (subItemObjId) {
+    subItemDoc = await Item.findById(subItemObjId).lean();
+    if (subItemDoc && subItemDoc.parentId) {
+      parentItemDoc = await Item.findById(subItemDoc.parentId).lean();
+      if (parentItemDoc) {
+        // Find customers whose name matches this warehouse location
+        const custs = await Customer.find({ 
+          name: parentItemDoc.name, 
+          isWarehouse: true 
+        }).select('_id').lean();
+        warehouseCustomerIds = custs.map(c => c._id);
+      }
+    }
+  }
+
+  // 1. Calculate Stock In
   const inMatch = { 'items.itemId': itemObjId };
   if (subItemObjId) inMatch['items.subItemId'] = subItemObjId;
 
+  // Base Stock In from StockEntry
   const stockEntryIn = await StockEntry.aggregate([
     { $unwind: '$items' },
     { $match: inMatch },
     { $group: { _id: null, totalQty: { $sum: '$items.itemNetWeight' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
 
-  // NEW: Sum In from Sales where Customer is a Warehouse (Internal Transfer)
+  // Smart Stock In from Transfers (Sales to Warehouse Customer)
   const internalIn = await Sale.aggregate([
     { $unwind: '$items' },
-    { $match: inMatch },
     {
       $lookup: {
-        from: 'customers',
-        localField: 'customerId',
+        from: 'items',
+        localField: 'items.itemId',
         foreignField: '_id',
-        as: 'cust'
+        as: 'itemDoc'
       }
     },
-    { $unwind: '$cust' },
-    { $match: { 'cust.isWarehouse': true } },
+    { $unwind: '$itemDoc' },
+    {
+      $match: {
+        $or: [
+          // Case A: Explicit sub-item match
+          inMatch,
+          // Case B: Smart name-match (Sale of a Main Item to THIS Warehouse)
+          ...( (subItemDoc && warehouseCustomerIds.length) ? [{
+            'customerId': { $in: warehouseCustomerIds },
+            'itemDoc.name': subItemDoc.name
+          }] : [] )
+        ]
+      }
+    },
     { $group: { _id: null, totalQty: { $sum: '$items.quantity' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
 
   const stockInQty = (stockEntryIn[0]?.totalQty ?? 0) + (internalIn[0]?.totalQty ?? 0);
   const stockInKattay = (stockEntryIn[0]?.totalKattay ?? 0) + (internalIn[0]?.totalKattay ?? 0);
 
-  // Sum Out from Sale.items (Only real sales to non-warehouse customers)
+  // 2. Calculate Stock Out
   const saleMatch = { 'items.itemId': itemObjId };
   if (subItemObjId) saleMatch['items.subItemId'] = subItemObjId;
   if (excludeSaleId) saleMatch._id = { $ne: new mongoose.Types.ObjectId(excludeSaleId) };
-  
+
   const outResult = await Sale.aggregate([
     { $unwind: '$items' },
     { $match: saleMatch },
@@ -53,9 +85,11 @@ async function getAvailableQuantity(models, itemId, subItemId = null, excludeSal
       }
     },
     { $unwind: '$cust' },
-    { $match: { 'cust.isWarehouse': false } }, // Only count real party sales as "Out"
+    // Only count real party sales as "Out" for a warehouse
+    { $match: { 'cust.isWarehouse': false } },
     { $group: { _id: null, totalQty: { $sum: '$items.quantity' }, totalKattay: { $sum: '$items.kattay' } } },
   ]);
+
   const stockOutQty = outResult[0]?.totalQty ?? 0;
   const stockOutKattay = outResult[0]?.totalKattay ?? 0;
 
