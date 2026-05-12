@@ -12,5 +12,6 @@ router.get('/:id', protect, asyncHandler(saleController.getById));
 router.post('/', protect, upload.single('image'), asyncHandler(saleController.create));
 router.put('/:id', protect, superAdminOnly, upload.single('image'), asyncHandler(saleController.update));
 router.post('/:id/collect-payment', protect, asyncHandler(saleController.collectPayment));
+router.delete('/:id', protect, superAdminOnly, asyncHandler(saleController.remove));
 
 export default router;

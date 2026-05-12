@@ -535,3 +535,19 @@ export const collectPayment = async (req, res) => {
     message: `Rs. ${amt.toLocaleString()} collected successfully.`,
   });
 };
+
+export const remove = async (req, res) => {
+  const { Sale, Transaction } = req.models;
+  const sale = await Sale.findById(req.params.id);
+  if (!sale) {
+    return res.status(404).json({ success: false, message: 'Sale not found' });
+  }
+
+  // Delete all linked transactions
+  await Transaction.deleteMany({ saleId: sale._id });
+
+  // Delete the sale itself
+  await Sale.findByIdAndDelete(req.params.id);
+
+  res.json({ success: true, message: 'Sale and linked transactions deleted successfully' });
+};
