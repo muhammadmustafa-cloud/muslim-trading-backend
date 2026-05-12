@@ -12,5 +12,6 @@ router.get('/:id/sub-items-summary', protect, asyncHandler(itemController.getSub
 router.get('/:id', protect, asyncHandler(itemController.getById));
 router.post('/', protect, superAdminOnly, asyncHandler(itemController.create));
 router.put('/:id', protect, superAdminOnly, asyncHandler(itemController.update));
+router.delete('/:id', protect, superAdminOnly, asyncHandler(itemController.remove));
 
 export default router;

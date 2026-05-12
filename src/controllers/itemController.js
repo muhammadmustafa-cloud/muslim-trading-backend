@@ -417,4 +417,53 @@ export const getSubItemsSalesSummary = async (req, res) => {
   res.json({ success: true, data: result });
 };
 
+export const remove = async (req, res) => {
+  const { Item, Sale, StockEntry } = req.models;
+  const itemId = req.params.id;
+
+  const item = await Item.findById(itemId);
+  if (!item) return res.status(404).json({ success: false, message: "Item not found" });
+
+  // 1. Check if this is a main item and if it has any usage or sub-item usage
+  const subItems = await Item.find({ parentId: itemId }).lean();
+  const subItemIds = subItems.map(si => si._id);
+  const allIdsToCheck = [itemId, ...subItemIds];
+
+  // 2. Check Sales
+  const usedInSale = await Sale.findOne({
+    $or: [
+      { "items.itemId": { $in: allIdsToCheck } },
+      { "items.subItemId": { $in: allIdsToCheck } }
+    ]
+  });
+  if (usedInSale) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Ye Item delete nahi ho sakta kyunke iske Bills (Sales) maujood hain." 
+    });
+  }
+
+  // 3. Check Stock Entries
+  const usedInStock = await StockEntry.findOne({
+    $or: [
+      { "items.itemId": { $in: allIdsToCheck } },
+      { "items.subItemId": { $in: allIdsToCheck } }
+    ]
+  });
+  if (usedInStock) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Ye Item delete nahi ho sakta kyunke iska Stock (Inward) record maujood hai." 
+    });
+  }
+
+  // 4. If no usage, delete sub-items first then the main item
+  if (subItems.length > 0) {
+    await Item.deleteMany({ parentId: itemId });
+  }
+  await Item.findByIdAndDelete(itemId);
+
+  res.json({ success: true, message: "Item aur uske Sub-items delete kar diye gaye hain." });
+};
+
 
