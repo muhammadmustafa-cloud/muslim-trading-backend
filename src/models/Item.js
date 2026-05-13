@@ -8,6 +8,7 @@ export const itemSchema = new mongoose.Schema(
     openingBags: { type: Number, default: 0 },
     openingWeight: { type: Number, default: 0 },
     parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', default: null },
+    linkedWarehouseCustomerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   },
   { timestamps: true }
 );

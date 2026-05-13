@@ -102,7 +102,7 @@ export const update = async (req, res) => {
 
 /** History: sales (unse becha) + stock entries (unse khareeda) if linked supplier. Query: dateFrom, dateTo (YYYY-MM-DD), type=sales|stock */
 export const getHistory = async (req, res) => {
-  const { Customer, Sale, StockEntry, Transaction } = req.models;
+  const { Customer, Sale, StockEntry, Transaction, Item } = req.models;
   const customer = await Customer.findById(req.params.id).lean();
   if (!customer) {
     return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -132,9 +132,30 @@ export const getHistory = async (req, res) => {
   }
   if (hasDateFilter) transMatch.date = dateFilter;
 
+  // Find items linked to this customer (for warehouse credit logic)
+  const personObjId = new mongoose.Types.ObjectId(custId);
+  const linkedItems = await Item.find({ linkedWarehouseCustomerId: personObjId }).select('_id name').lean();
+  const linkedItemIds = linkedItems.map(i => i._id.toString());
+
+  // Query for sales where this warehouse is the "Source" (Credit side)
+  const warehouseSaleMatch = (linkedItemIds.length > 0) ? { 
+    $or: [
+      { 'items.itemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } },
+      { 'items.subItemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } }
+    ],
+    customerId: { $ne: personObjId } 
+  } : null;
+  if (warehouseSaleMatch && hasDateFilter) warehouseSaleMatch.date = dateFilter;
+
   // 2. Fetch all data in parallel
-  const [sales, stockEntries, transactions] = await Promise.all([
+  const [sales, warehouseSales, stockEntries, transactions] = await Promise.all([
     Sale.find(saleMatch).populate('items.itemId', 'name').populate('accountId', 'name').lean(),
+    warehouseSaleMatch
+      ? Sale.find(warehouseSaleMatch)
+          .populate('customerId', 'name')
+          .populate({ path: 'items.itemId', select: 'name quality' })
+          .lean()
+      : [],
     stockMatch ? StockEntry.find(stockMatch).populate('items.itemId', 'name').lean() : [],
     Transaction.find(transMatch)
       .populate('fromAccountId', 'name')
@@ -188,7 +209,32 @@ export const getHistory = async (req, res) => {
       debit: s.totalAmount || 0,
       credit: 0,
       type: 'sale',
-      refId: s._id
+    });
+  });
+
+  // Warehouse Sales (Cr for warehouse)
+  warehouseSales.forEach(ws => {
+    const matchingItems = ws.items?.filter(it => {
+      const mainId = it.itemId?._id?.toString() || it.itemId?.toString();
+      const subId = it.subItemId?._id?.toString() || it.subItemId?.toString();
+      return linkedItemIds.includes(mainId) || (subId && linkedItemIds.includes(subId));
+    }) || [];
+
+    if (matchingItems.length === 0) return;
+
+    const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
+    const totalBags = matchingItems.reduce((sum, it) => sum + (it.kattay || 0), 0);
+    const totalNet = matchingItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
+    const totalAmount = matchingItems.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+
+    ledger.push({
+      date: ws.date,
+      description: `Stock Out to ${ws.customerId?.name || 'Party'}: ${itemNames} (Truck: ${ws.truckNumber || 'N/A'})`,
+      bags: totalBags,
+      debit: 0,
+      credit: totalAmount,
+      type: 'sale',
+      refId: ws._id
     });
   });
 

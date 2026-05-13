@@ -187,6 +187,60 @@ export const getAuditSummary = async (req, res) => {
        { $group: { _id: '$customerId', total: { $sum: '$totalAmount' } } }
     ]);
 
+    // ----------------------------------------------------
+    // WAREHOUSE REDIRECTION LOGIC (Audit Summary)
+    // ----------------------------------------------------
+    const warehouseItems = allItems.filter(i => i.linkedWarehouseCustomerId);
+    const warehouseItemIds = warehouseItems.map(i => i._id.toString());
+    const itemToCustomerMap = new Map(warehouseItems.map(i => [i._id.toString(), i.linkedWarehouseCustomerId.toString()]));
+
+    // All-time redirected sales (for balance snapshot)
+    const allTimeWarehouseSalesAgg = await Sale.aggregate([
+      { $match: snapshotMatch },
+      { $unwind: '$items' },
+      { $group: { 
+          _id: {
+            $cond: [
+              { $in: [{ $toString: '$items.itemId' }, warehouseItemIds] },
+              { $toString: '$items.itemId' },
+              { $cond: [{ $in: [{ $toString: '$items.subItemId' }, warehouseItemIds] }, { $toString: '$items.subItemId' }, null] }
+            ]
+          },
+          total: { $sum: '$items.totalAmount' }
+      }},
+      { $match: { _id: { $ne: null } } }
+    ]);
+
+    const warehouseCreditsAllTime = new Map();
+    allTimeWarehouseSalesAgg.forEach(a => {
+      const custId = itemToCustomerMap.get(a._id);
+      warehouseCreditsAllTime.set(custId, (warehouseCreditsAllTime.get(custId) || 0) + a.total);
+    });
+
+    // Period redirected sales (for period In/Out)
+    const periodWarehouseSalesAgg = await Sale.aggregate([
+      { $match: activityMatch },
+      { $unwind: '$items' },
+      { $group: { 
+          _id: {
+            $cond: [
+              { $in: [{ $toString: '$items.itemId' }, warehouseItemIds] },
+              { $toString: '$items.itemId' },
+              { $cond: [{ $in: [{ $toString: '$items.subItemId' }, warehouseItemIds] }, { $toString: '$items.subItemId' }, null] }
+            ]
+          },
+          total: { $sum: '$items.totalAmount' }
+      }},
+      { $match: { _id: { $ne: null } } }
+    ]);
+
+    const warehouseCreditsPeriod = new Map();
+    periodWarehouseSalesAgg.forEach(a => {
+      const custId = itemToCustomerMap.get(a._id);
+      warehouseCreditsPeriod.set(custId, (warehouseCreditsPeriod.get(custId) || 0) + a.total);
+    });
+    // ----------------------------------------------------
+
     const periodMatch = activityMatch;
     const periodCustomerTrans = await Transaction.aggregate([
       { $match: { ...periodMatch, customerId: { $ne: null } } },
@@ -202,18 +256,24 @@ export const getAuditSummary = async (req, res) => {
     ]);
 
     const detailedCustomers = customers.map(c => {
-      const snapTrans = customerTransactions.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const snapSales = customerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
-      const pTrans = periodCustomerTrans.find(b => b._id?.toString() === c._id.toString()) || { totalIn: 0, totalOut: 0 };
-      const pSales = periodCustomerSales.find(s => s._id?.toString() === c._id.toString()) || { total: 0 };
+      const cIdStr = c._id.toString();
+      const snapTrans = customerTransactions.find(b => b._id?.toString() === cIdStr) || { totalIn: 0, totalOut: 0 };
+      const snapSales = customerSales.find(s => s._id?.toString() === cIdStr) || { total: 0 };
+      const pTrans = periodCustomerTrans.find(b => b._id?.toString() === cIdStr) || { totalIn: 0, totalOut: 0 };
+      const pSales = periodCustomerSales.find(s => s._id?.toString() === cIdStr) || { total: 0 };
 
-      const balance = (c.openingBalance || 0) + snapSales.total - snapTrans.totalIn + snapTrans.totalOut;
+      // Warehouse Credits
+      const warehouseCrAllTime = warehouseCreditsAllTime.get(cIdStr) || 0;
+      const warehouseCrPeriod = warehouseCreditsPeriod.get(cIdStr) || 0;
+
+      // Balance = Base + Sales - (standardIn + warehouseIn) + standardOut
+      const balance = (c.openingBalance || 0) + snapSales.total - (snapTrans.totalIn + warehouseCrAllTime) + snapTrans.totalOut;
       return { 
         _id: c._id, 
         name: c.name, 
         balance, 
         phone: c.phone || '',
-        periodIn: pTrans.totalIn, // RECEIVED in period
+        periodIn: pTrans.totalIn + warehouseCrPeriod, // RECEIVED in period (Standard + Warehouse Redirected)
         periodOut: pSales.total + pTrans.totalOut // BILLED in period
       };
     }).sort((a, b) => b.balance - a.balance);
@@ -336,13 +396,18 @@ export const getAuditSummary = async (req, res) => {
     ]);
 
     const detailedItems = allItems.map(item => {
-      const p = itemPurchaseAgg.find(x => x._id?.toString() === item._id.toString()) || { totalPurchase: 0 };
-      const s = itemSaleAgg.find(x => x._id?.toString() === item._id.toString()) || { totalSale: 0 };
+      const itemIdStr = item._id.toString();
+      const p = itemPurchaseAgg.find(x => x._id?.toString() === itemIdStr) || { totalPurchase: 0 };
+      const s = itemSaleAgg.find(x => x._id?.toString() === itemIdStr) || { totalSale: 0 };
+      
+      const isWarehouseItem = warehouseItemIds.includes(itemIdStr);
+
       return {
         _id: item._id,
         name: item.name,
         purchaseVolume: p.totalPurchase,
-        saleVolume: s.totalSale
+        // Hide sale volume if it was redirected to a customer ledger
+        saleVolume: isWarehouseItem ? 0 : s.totalSale
       };
     }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0);
     
@@ -381,6 +446,49 @@ export const getAuditSummary = async (req, res) => {
     .populate('rawMaterialHeadId', 'name')
     .sort({ date: 1 })
     .lean();
+
+    // ----------------------------------------------------
+    // INJECT VIRTUAL WAREHOUSE TRANSACTIONS INTO MASTER LOG
+    // ----------------------------------------------------
+    if (warehouseCreditsPeriod.size > 0) {
+      // We need to fetch the actual sales to get details for the log
+      const periodWarehouseSales = await Sale.find(activityMatch)
+        .populate('customerId', 'name')
+        .populate('items.itemId', 'name')
+        .lean();
+
+      periodWarehouseSales.forEach(ws => {
+        const matchingItems = ws.items?.filter(it => {
+          const mId = it.itemId?._id?.toString() || it.itemId?.toString();
+          const sId = it.subItemId?._id?.toString() || it.subItemId?.toString();
+          return warehouseItemIds.includes(mId) || (sId && warehouseItemIds.includes(sId));
+        }) || [];
+
+        if (matchingItems.length === 0) return;
+
+        const totalAmt = matchingItems.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+        const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
+        
+        // Find the linked customer (for the first matching item)
+        const firstMatchId = matchingItems[0].itemId?._id?.toString() || matchingItems[0].itemId?.toString();
+        const warehouseCustId = itemToCustomerMap.get(firstMatchId);
+        const warehouseCust = customers.find(c => c._id.toString() === warehouseCustId);
+
+        periodTransactions.push({
+          _id: `v-${ws._id}`,
+          date: ws.date,
+          type: 'deposit', // Shows as Credit/Aamad
+          amount: totalAmt,
+          note: `Warehouse Stock Out to ${ws.customerId?.name || 'Party'}`,
+          category: 'warehouse_redirection',
+          customerId: warehouseCust, // The warehouse being credited
+          isVirtual: true
+        });
+      });
+      // Re-sort master log
+      periodTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+    }
+    // ----------------------------------------------------
 
     const detailedExpenses = periodTransactions.filter(t => t.type === 'expense');
     const detailedTaxes = periodTransactions.filter(t => t.type === 'tax');

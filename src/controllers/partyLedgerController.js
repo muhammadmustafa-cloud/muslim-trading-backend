@@ -10,7 +10,7 @@ import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
  * plus payment rows, all with a running balance.
  */
 export const getPartyLedger = async (req, res) => {
-  const { Customer, Supplier, Sale, StockEntry, Transaction } = req.models;
+  const { Customer, Supplier, Sale, StockEntry, Transaction, Item } = req.models;
   const { role, dateFrom, dateTo, itemId } = req.query;
   const personId = req.params.id;
 
@@ -53,8 +53,26 @@ export const getPartyLedger = async (req, res) => {
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
   // ── 3. Build query matches ──
-  const saleMatch = customerId ? { customerId: new mongoose.Types.ObjectId(customerId) } : null;
+  const personObjId = new mongoose.Types.ObjectId(personId);
+  const personCustId = customerId ? new mongoose.Types.ObjectId(customerId) : null;
+
+  // Find items linked to this customer (for warehouse credit logic)
+  const linkedItems = await Item.find({ linkedWarehouseCustomerId: personObjId }).select('_id name').lean();
+  const linkedItemIds = linkedItems.map(i => i._id.toString());
+
+  const saleMatch = personCustId ? { customerId: personCustId } : null;
   if (saleMatch && hasDateFilter) saleMatch.date = dateFilter;
+
+  // Query for sales where this warehouse is the "Source" (Credit side)
+  // Check both Main Item and Sub Item for a match
+  const warehouseSaleMatch = (linkedItemIds.length > 0) ? { 
+    $or: [
+      { 'items.itemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } },
+      { 'items.subItemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } }
+    ],
+    customerId: { $ne: personCustId } // Don't duplicate if already in saleMatch
+  } : null;
+  if (warehouseSaleMatch && hasDateFilter) warehouseSaleMatch.date = dateFilter;
 
   const stockMatch = supplierId ? { supplierId: new mongoose.Types.ObjectId(supplierId) } : null;
   if (stockMatch && hasDateFilter) stockMatch.date = dateFilter;
@@ -73,11 +91,17 @@ export const getPartyLedger = async (req, res) => {
   if (hasDateFilter) transMatch.date = dateFilter;
 
   // ── 4. Fetch all data in parallel ──
-  const [sales, stockEntries, transactions] = await Promise.all([
+  const [sales, warehouseSales, stockEntries, transactions] = await Promise.all([
     saleMatch
       ? Sale.find(saleMatch)
           .populate({ path: 'items.itemId', select: 'name quality' })
           .populate('accountId', 'name')
+          .lean()
+      : [],
+    warehouseSaleMatch
+      ? Sale.find(warehouseSaleMatch)
+          .populate('customerId', 'name')
+          .populate({ path: 'items.itemId', select: 'name quality' })
           .lean()
       : [],
     stockMatch
@@ -176,6 +200,41 @@ export const getPartyLedger = async (req, res) => {
       credit: 0,
       truckNumber: s.truckNumber || '',
       refId: s._id,
+    });
+  });
+
+  // ── Warehouse Sales rows (Cr for warehouse) ──
+  warehouseSales.forEach(ws => {
+    // Only count items that are linked to THIS person (check Main or Sub)
+    const matchingItems = ws.items?.filter(it => {
+      const mainId = it.itemId?._id?.toString() || it.itemId?.toString();
+      const subId = it.subItemId?._id?.toString() || it.subItemId?.toString();
+      return linkedItemIds.includes(mainId) || (subId && linkedItemIds.includes(subId));
+    }) || [];
+
+    if (matchingItems.length === 0) return;
+
+    const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
+    const totalBags = matchingItems.reduce((sum, it) => sum + (it.kattay || 0), 0);
+    const totalNet = matchingItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
+    const totalAmount = matchingItems.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+    const totalMun = totalNet / 40;
+    const avgRate = totalMun > 0 ? Math.round(totalAmount / totalMun) : 0;
+
+    ledger.push({
+      date: ws.date,
+      type: 'sale',
+      description: `Stock Out to ${ws.customerId?.name || 'Party'}: ${itemNames}`,
+      itemNames,
+      bags: totalBags,
+      grossWeight: 0,
+      netWeight: totalNet,
+      mun: Number(totalMun.toFixed(4)),
+      avgRate,
+      debit: 0,
+      credit: totalAmount,
+      truckNumber: ws.truckNumber || '',
+      refId: ws._id,
     });
   });
 

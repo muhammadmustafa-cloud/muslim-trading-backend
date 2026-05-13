@@ -40,6 +40,7 @@ export const create = async (req, res) => {
     categoryId: categoryId || null,
     quality: (quality || '').trim(),
     parentId: parentId || null,
+    linkedWarehouseCustomerId: req.body.linkedWarehouseCustomerId || null,
   });
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.status(201).json({ success: true, data: populated });
@@ -60,6 +61,7 @@ export const update = async (req, res) => {
   if (categoryId !== undefined) item.categoryId = categoryId || null;
   if (quality !== undefined) item.quality = (quality || '').trim();
   if (parentId !== undefined) item.parentId = parentId || null;
+  if (req.body.linkedWarehouseCustomerId !== undefined) item.linkedWarehouseCustomerId = req.body.linkedWarehouseCustomerId || null;
   await item.save();
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.json({ success: true, data: populated });
@@ -205,23 +207,26 @@ export const getKhata = async (req, res) => {
   const totalMunSold = totalWeightSold / 40;
   const profit = totalRevenue - totalCost;
 
+  const isWarehouseItem = !!item.linkedWarehouseCustomerId;
+
   res.json({
     success: true,
     data: {
       name: item.name,
       category: item.categoryId?.name ?? '',
       quality: item.quality ?? '',
-      purchases,
-      sales: salesWithItem,
-      totalCost,
-      totalRevenue,
+      purchases: isWarehouseItem ? purchases.map(p => ({ ...p, amount: 0, rate: 0 })) : purchases,
+      sales: isWarehouseItem ? salesWithItem.map(s => ({ ...s, totalAmount: 0, rate: 0 })) : salesWithItem,
+      totalCost: isWarehouseItem ? 0 : totalCost,
+      totalRevenue: isWarehouseItem ? 0 : totalRevenue,
       totalBagsPurchased,
       totalBagsSold,
       stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
       stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
       totalMunPurchased,
       totalMunSold,
-      profit,
+      profit: isWarehouseItem ? 0 : profit,
+      isWarehouseItem,
     },
   });
 };
