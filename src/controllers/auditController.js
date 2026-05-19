@@ -194,50 +194,95 @@ export const getAuditSummary = async (req, res) => {
     const warehouseItemIds = warehouseItems.map(i => i._id.toString());
     const itemToCustomerMap = new Map(warehouseItems.map(i => [i._id.toString(), i.linkedWarehouseCustomerId.toString()]));
 
+    // Build a list of "self-warehouse" sale exclusion keys: "itemId_customerId"
+    // These are sales where the BUYER is the same as the item's linked warehouse customer.
+    // In that case the credit already flows naturally via pSales — no redirection needed.
+    // Format: "itemIdStr_warehouseCustIdStr" — we exclude these from redirection aggregations.
+    const selfWarehousePairs = warehouseItems.map(i => `${i._id.toString()}_${i.linkedWarehouseCustomerId.toString()}`);
+
+    // Helper: given an itemId string and a custId string, is this a self-warehouse sale?
+    const isSelfWarehouseSale = (itemIdStr, custIdStr) =>
+      selfWarehousePairs.includes(`${itemIdStr}_${custIdStr}`);
+
     // All-time redirected sales (for balance snapshot)
-    const allTimeWarehouseSalesAgg = await Sale.aggregate([
+    // FIXED: Exclude self-warehouse sales (buyer IS the linked warehouse customer)
+    const allTimeWarehouseSalesRaw = await Sale.aggregate([
       { $match: snapshotMatch },
       { $unwind: '$items' },
-      { $group: { 
-          _id: {
-            $cond: [
-              { $in: [{ $toString: '$items.itemId' }, warehouseItemIds] },
-              { $toString: '$items.itemId' },
-              { $cond: [{ $in: [{ $toString: '$items.subItemId' }, warehouseItemIds] }, { $toString: '$items.subItemId' }, null] }
-            ]
-          },
-          total: { $sum: '$items.totalAmount' }
-      }},
-      { $match: { _id: { $ne: null } } }
+      {
+        $addFields: {
+          _itemIdStr:    { $toString: '$items.itemId' },
+          _subItemIdStr: { $toString: { $ifNull: ['$items.subItemId', ''] } },
+          _custIdStr:    { $toString: '$customerId' }
+        }
+      },
+      {
+        $match: {
+          $or: [
+            { _itemIdStr:    { $in: warehouseItemIds } },
+            { _subItemIdStr: { $in: warehouseItemIds } }
+          ]
+        }
+      }
     ]);
 
     const warehouseCreditsAllTime = new Map();
-    allTimeWarehouseSalesAgg.forEach(a => {
-      const custId = itemToCustomerMap.get(a._id);
-      warehouseCreditsAllTime.set(custId, (warehouseCreditsAllTime.get(custId) || 0) + a.total);
+    allTimeWarehouseSalesRaw.forEach(row => {
+      const itemIdStr    = row._itemIdStr;
+      const subItemIdStr = row._subItemIdStr;
+      const custIdStr    = row._custIdStr;
+      const resolvedItemId = warehouseItemIds.includes(itemIdStr) ? itemIdStr
+                           : warehouseItemIds.includes(subItemIdStr) ? subItemIdStr
+                           : null;
+      if (!resolvedItemId) return;
+      // Skip self-warehouse sales — buyer is the warehouse customer itself
+      if (isSelfWarehouseSale(resolvedItemId, custIdStr)) return;
+      const warehouseCustId = itemToCustomerMap.get(resolvedItemId);
+      if (!warehouseCustId) return;
+      const amt = row.items?.totalAmount || 0;
+      warehouseCreditsAllTime.set(warehouseCustId, (warehouseCreditsAllTime.get(warehouseCustId) || 0) + amt);
     });
 
     // Period redirected sales (for period In/Out)
-    const periodWarehouseSalesAgg = await Sale.aggregate([
+    // FIXED: Exclude self-warehouse sales
+    const periodWarehouseSalesRaw = await Sale.aggregate([
       { $match: activityMatch },
       { $unwind: '$items' },
-      { $group: { 
-          _id: {
-            $cond: [
-              { $in: [{ $toString: '$items.itemId' }, warehouseItemIds] },
-              { $toString: '$items.itemId' },
-              { $cond: [{ $in: [{ $toString: '$items.subItemId' }, warehouseItemIds] }, { $toString: '$items.subItemId' }, null] }
-            ]
-          },
-          total: { $sum: '$items.totalAmount' }
-      }},
-      { $match: { _id: { $ne: null } } }
+      {
+        $addFields: {
+          _itemIdStr:    { $toString: '$items.itemId' },
+          _subItemIdStr: { $toString: { $ifNull: ['$items.subItemId', ''] } },
+          _custIdStr:    { $toString: '$customerId' }
+        }
+      },
+      {
+        $match: {
+          $or: [
+            { _itemIdStr:    { $in: warehouseItemIds } },
+            { _subItemIdStr: { $in: warehouseItemIds } }
+          ]
+        }
+      }
     ]);
 
     const warehouseCreditsPeriod = new Map();
-    periodWarehouseSalesAgg.forEach(a => {
-      const custId = itemToCustomerMap.get(a._id);
-      warehouseCreditsPeriod.set(custId, (warehouseCreditsPeriod.get(custId) || 0) + a.total);
+    // Also track per-sale detail for virtual master log injection
+    const periodWarehouseDetails = [];
+    periodWarehouseSalesRaw.forEach(row => {
+      const itemIdStr    = row._itemIdStr;
+      const subItemIdStr = row._subItemIdStr;
+      const custIdStr    = row._custIdStr;
+      const resolvedItemId = warehouseItemIds.includes(itemIdStr) ? itemIdStr
+                           : warehouseItemIds.includes(subItemIdStr) ? subItemIdStr
+                           : null;
+      if (!resolvedItemId) return;
+      // Skip self-warehouse sales — buyer is the warehouse customer itself
+      if (isSelfWarehouseSale(resolvedItemId, custIdStr)) return;
+      const warehouseCustId = itemToCustomerMap.get(resolvedItemId);
+      if (!warehouseCustId) return;
+      const amt = row.items?.totalAmount || 0;
+      warehouseCreditsPeriod.set(warehouseCustId, (warehouseCreditsPeriod.get(warehouseCustId) || 0) + amt);
+      periodWarehouseDetails.push({ saleId: row._id, date: row.date, custIdStr, warehouseCustId, resolvedItemId, amt });
     });
     // ----------------------------------------------------
 
@@ -395,6 +440,23 @@ export const getAuditSummary = async (req, res) => {
       ])
     ]);
 
+    // Build a per-item map of self-warehouse sale amounts in this period.
+    // These are sales where the buyer IS the linked warehouse customer (not redirected).
+    const selfWarehouseSaleByItem = new Map();
+    periodWarehouseSalesRaw.forEach(row => {
+      const itemIdStr    = row._itemIdStr;
+      const subItemIdStr = row._subItemIdStr;
+      const custIdStr    = row._custIdStr;
+      const resolvedItemId = warehouseItemIds.includes(itemIdStr) ? itemIdStr
+                           : warehouseItemIds.includes(subItemIdStr) ? subItemIdStr
+                           : null;
+      if (!resolvedItemId) return;
+      // Only count self-warehouse sales here
+      if (!isSelfWarehouseSale(resolvedItemId, custIdStr)) return;
+      const amt = row.items?.totalAmount || 0;
+      selfWarehouseSaleByItem.set(resolvedItemId, (selfWarehouseSaleByItem.get(resolvedItemId) || 0) + amt);
+    });
+
     const detailedItems = allItems.map(item => {
       const itemIdStr = item._id.toString();
       const p = itemPurchaseAgg.find(x => x._id?.toString() === itemIdStr) || { totalPurchase: 0 };
@@ -402,12 +464,19 @@ export const getAuditSummary = async (req, res) => {
       
       const isWarehouseItem = warehouseItemIds.includes(itemIdStr);
 
+      let saleVolume = s.totalSale;
+      if (isWarehouseItem) {
+        // For warehouse items: suppress the REDIRECTED portion (3rd-party buyer sales).
+        // But keep the SELF-WAREHOUSE portion (buyer is the warehouse customer itself).
+        // saleVolume to show = only the self-warehouse sales (already captured in customer's periodOut)
+        saleVolume = selfWarehouseSaleByItem.get(itemIdStr) || 0;
+      }
+
       return {
         _id: item._id,
         name: item.name,
         purchaseVolume: p.totalPurchase,
-        // Hide sale volume if it was redirected to a customer ledger
-        saleVolume: isWarehouseItem ? 0 : s.totalSale
+        saleVolume
       };
     }).filter(i => i.purchaseVolume > 0 || i.saleVolume > 0);
     
@@ -449,27 +518,33 @@ export const getAuditSummary = async (req, res) => {
 
     // ----------------------------------------------------
     // INJECT VIRTUAL WAREHOUSE TRANSACTIONS INTO MASTER LOG
+    // FIXED: Only inject for non-self-warehouse sales
     // ----------------------------------------------------
     if (warehouseCreditsPeriod.size > 0) {
-      // We need to fetch the actual sales to get details for the log
       const periodWarehouseSales = await Sale.find(activityMatch)
         .populate('customerId', 'name')
         .populate('items.itemId', 'name')
         .lean();
 
       periodWarehouseSales.forEach(ws => {
+        const wsCustIdStr = ws.customerId?._id?.toString() || ws.customerId?.toString();
+
         const matchingItems = ws.items?.filter(it => {
           const mId = it.itemId?._id?.toString() || it.itemId?.toString();
           const sId = it.subItemId?._id?.toString() || it.subItemId?.toString();
-          return warehouseItemIds.includes(mId) || (sId && warehouseItemIds.includes(sId));
+          const matchedId = warehouseItemIds.includes(mId) ? mId
+                          : (sId && warehouseItemIds.includes(sId)) ? sId
+                          : null;
+          if (!matchedId) return false;
+          // FIXED: Skip if buyer IS the warehouse customer for this item
+          if (isSelfWarehouseSale(matchedId, wsCustIdStr)) return false;
+          return true;
         }) || [];
 
         if (matchingItems.length === 0) return;
 
         const totalAmt = matchingItems.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
-        const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
         
-        // Find the linked customer (for the first matching item)
         const firstMatchId = matchingItems[0].itemId?._id?.toString() || matchingItems[0].itemId?.toString();
         const warehouseCustId = itemToCustomerMap.get(firstMatchId);
         const warehouseCust = customers.find(c => c._id.toString() === warehouseCustId);
@@ -477,15 +552,14 @@ export const getAuditSummary = async (req, res) => {
         periodTransactions.push({
           _id: `v-${ws._id}`,
           date: ws.date,
-          type: 'deposit', // Shows as Credit/Aamad
+          type: 'deposit',
           amount: totalAmt,
           note: `Warehouse Stock Out to ${ws.customerId?.name || 'Party'}`,
           category: 'warehouse_redirection',
-          customerId: warehouseCust, // The warehouse being credited
+          customerId: warehouseCust,
           isVirtual: true
         });
       });
-      // Re-sort master log
       periodTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
     }
     // ----------------------------------------------------
