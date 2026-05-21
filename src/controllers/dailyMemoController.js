@@ -98,14 +98,16 @@ const buildLedgerRows = (transactions) => {
     } 
     else if (["withdraw", "salary", "tax", "expense"].includes(type)) {
       const isBankSource = t.fromAccountId?.type === "Bank";
+      const isMirrorFalse = t.fromAccountId?.showMirrorInDailyMemo === false;
 
       // Primary: Money leaving account
       rows.push({
         type: category || type,
         date: formatDateOnly(t.date),
-        name: t.fromAccountId?.name || "Manual",
+        // If mirror is explicitly false, flip names to render "Account ➔ Party" on Kharch side
+        name: isMirrorFalse ? (displayName || "Manual") : (t.fromAccountId?.name || "Manual"),
         description: desc,
-        accountName: displayName || "Account",
+        accountName: isMirrorFalse ? (t.fromAccountId?.name || "Account") : (displayName || "Account"),
         amount: t.amount,
         amountType: "out",
         isExternal: !isInternalTransfer,
@@ -113,8 +115,7 @@ const buildLedgerRows = (transactions) => {
       });
 
       // Contra
-      const shouldContra = (hasParty || (isBankSource && displayName)) && 
-                          t.fromAccountId?.showMirrorInDailyMemo !== false;
+      const shouldContra = (hasParty || (isBankSource && displayName)) && !isMirrorFalse;
 
       if (shouldContra) {
         rows.push({
