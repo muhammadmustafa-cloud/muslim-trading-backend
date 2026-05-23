@@ -69,12 +69,14 @@ const buildLedgerRows = (transactions) => {
       const isBankDest = t.toAccountId?.type === "Bank";
 
       // Primary: Money entering account
+      // For non-bank deposits: Customer is the source, Account is the destination
+      // UI renders "{accountName} ➔ {name}", so swap fields for non-bank to show "Customer ➔ Account"
       rows.push({
         type: category || "deposit",
         date: formatDateOnly(t.date),
-        name: displayName || "Manual",
+        name: isBankDest ? (displayName || "Manual") : (t.toAccountId?.name || "Account"),
         description: desc,
-        accountName: t.toAccountId?.name || "Account",
+        accountName: isBankDest ? (t.toAccountId?.name || "Account") : (displayName || "Manual"),
         amount: t.amount,
         amountType: isBankDest ? "out" : "in",
         isExternal: !isInternalTransfer,
