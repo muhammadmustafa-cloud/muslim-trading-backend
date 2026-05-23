@@ -59,7 +59,7 @@ export const getAuditSummary = async (req, res) => {
     // Calculate Mill Opening Balance (Pichli Wasooli) - Balance BEFORE the start of the selected range.
     const opBalBoundary = fromDate;
 
-    const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata);
+    const allMillAccs = accounts.filter(a => a.isDailyKhata || a.isMillKhata || a.showMirrorInDailyMemo === false);
     const millAccIds = allMillAccs.map(a => a._id);
     const baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
 

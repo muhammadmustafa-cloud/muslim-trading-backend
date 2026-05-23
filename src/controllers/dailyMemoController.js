@@ -264,7 +264,13 @@ export const getDailyMemo = async (req, res) => {
     const maz = await Mazdoor.findById(mazdoorId).lean();
     baseOpeningBalance = maz?.openingBalance || 0;
   } else {
-    const allMillAccs = await Account.find({ $or: [{ isDailyKhata: true }, { isMillKhata: true }] }).lean();
+    const allMillAccs = await Account.find({ 
+      $or: [
+        { isDailyKhata: true }, 
+        { isMillKhata: true },
+        { showMirrorInDailyMemo: false }
+      ] 
+    }).lean();
     baseOpeningBalance = allMillAccs.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
   }
 
