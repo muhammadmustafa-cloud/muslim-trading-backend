@@ -81,7 +81,7 @@ export const getHistory = async (req, res) => {
     .lean();
   
   const totalPaid = transactions.filter((t) => t.type === 'withdraw' || t.type === 'salary' || t.type === 'transfer').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-  const totalReceived = transactions.filter((t) => t.type === 'deposit' && t.category === 'udhaar_received').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const totalReceived = transactions.filter((t) => t.type === 'deposit').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   
   // Salary Accruals + Daily Wages (Credits)
   const totalEarned = transactions
