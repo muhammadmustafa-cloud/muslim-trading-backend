@@ -162,10 +162,11 @@ export const getAuditSummary = async (req, res) => {
         tIn,
         tOut,
         isDailyKhata: !!a.isDailyKhata,
-        isMillKhata: !!a.isMillKhata
+        isMillKhata: !!a.isMillKhata,
+        showMirrorInDailyMemo: a.showMirrorInDailyMemo
       });
 
-      if (!a.isDailyKhata && !a.isMillKhata) {
+      if (!a.isDailyKhata && !a.isMillKhata && a.showMirrorInDailyMemo !== false) {
          totalCash += balanceSnapshot;
       }
     }
