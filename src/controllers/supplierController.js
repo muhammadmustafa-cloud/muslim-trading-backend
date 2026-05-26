@@ -287,19 +287,20 @@ const supplierName = p.supplierId?.name;
 let paymentDesc = '';
 
 if (p.type === 'withdraw') {
-  // We paid supplier from account
-  paymentDesc = `Paid to ${supplierName || 'Supplier'} via ${fromAccount || 'Cash'}`;
+  // We paid supplier
+  paymentDesc = `Paid via ${fromAccount || 'Cash'}`;
 }
 else if (p.type === 'deposit') {
-  // Received from supplier/customer into account
-  paymentDesc = `Received from ${customerName || supplierName || 'Party'} via ${toAccount || 'Cash'}`;
+  // Received from supplier
+  paymentDesc = `Received via ${toAccount || 'Cash'}`;
 }
 else if (p.type === 'transfer') {
   if (isSupplierReceiver) {
-    // Customer → Supplier
-    paymentDesc = `Received from ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+    // Supplier received from customer
+    paymentDesc = customerName ? `Received from ${customerName} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})` : `Received via Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
   } else {
-    paymentDesc = `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+    // Supplier paid someone (or just transfer)
+    paymentDesc = customerName ? `Paid to ${customerName} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})` : `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
   }
 }
 

@@ -337,18 +337,18 @@ export const getHistory = async (req, res) => {
     let paymentDesc = '';
 
     if (p.type === 'deposit') {
-      paymentDesc = `Received from ${customerName || supplierName || 'Party'} via ${toAccount || 'Cash'}`;
+      paymentDesc = `Received via ${toAccount || 'Cash'}`;
     }
     else if (p.type === 'withdraw' || p.type === 'withdrawal') {
-      paymentDesc = `Paid to ${customerName || supplierName || 'Party'} via ${fromAccount || 'Cash'}`;
+      paymentDesc = `Paid via ${fromAccount || 'Cash'}`;
     }
     else if (p.type === 'transfer') {
       if (isCredit) {
-        // isCredit = isCustomerGiver → Customer ne kisi ko payment diya
-        paymentDesc = `Paid by ${customerName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+        // Customer paid to someone else (e.g. a supplier)
+        paymentDesc = supplierName ? `Paid to ${supplierName} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})` : `Paid via Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
       } else if (isDebit) {
-        // isDebit = isCustomerRecipient → Customer ko kisi ne payment diya
-        paymentDesc = `Received by ${customerName || supplierName || 'Customer'} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
+        // Customer received from someone else (e.g. a supplier)
+        paymentDesc = supplierName ? `Received from ${supplierName} (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})` : `Received via Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
       } else {
         paymentDesc = `Transfer (${fromAccount || 'Cash'} → ${toAccount || 'Cash'})`;
       }
