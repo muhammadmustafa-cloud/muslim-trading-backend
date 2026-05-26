@@ -154,18 +154,6 @@ export const getHistory = async (req, res) => {
   // 3. Transform into Ledger Entries
   const ledger = [];
 
-  const startBoundary = dateFrom ? toUTCStartOfDay(dateFrom) : null;
-  if (!dateFrom || (startBoundary && startBoundary <= new Date(supplier.createdAt))) {
-    ledger.push({
-      date: supplier.createdAt,
-      description: 'Opening Balance',
-      bags: 0,
-      debit: supplier.openingBalance > 0 ? supplier.openingBalance : 0,
-      credit: supplier.openingBalance < 0 ? Math.abs(supplier.openingBalance) : 0,
-      type: 'opening'
-    });
-  }
-
   // Purchases (Cr for us/supplier)
   stockEntries.forEach(e => {
     const itemNames = (e.items && e.items.length > 0)
@@ -175,6 +163,11 @@ export const getHistory = async (req, res) => {
     const totalBags = (e.items && e.items.length > 0)
       ? e.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
       : (e.kattay || 0);
+
+    const rates = (e.items && e.items.length > 0)
+      ? e.items.map(it => it.rate).filter(Boolean)
+      : [e.rate].filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString("en-PK")).join(', ') : '—';
 
     // Fix: Calculate from items to get correct amount without double-counting
     // item.amount already includes distributed bardana/mazdori/extras
@@ -186,6 +179,8 @@ export const getHistory = async (req, res) => {
       date: e.date,
       description: `Purchase: ${itemNames} (Truck: ${e.truckNumber || 'N/A'})`,
       bags: totalBags,
+      rate: rateStr,
+      dueDate: e.dueDate || null,
       debit: 0,
       credit: calculatedAmount,
       type: 'purchase',
@@ -203,10 +198,17 @@ export const getHistory = async (req, res) => {
       ? s.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
       : (s.kattay || 0);
 
+    const rates = (s.items && s.items.length > 0)
+      ? s.items.map(it => it.rate).filter(Boolean)
+      : [s.rate].filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString("en-PK")).join(', ') : '—';
+
     ledger.push({
       date: s.date,
       description: `Sale: ${itemNames} (Truck: ${s.truckNumber || 'N/A'})`,
       bags: totalBags,
+      rate: rateStr,
+      dueDate: s.dueDate || null,
       debit: s.totalAmount || 0,
       credit: 0,
       type: 'sale',

@@ -180,20 +180,6 @@ export const getHistory = async (req, res) => {
   // 3. Transform into Ledger Entries
   const ledger = [];
 
-  const startBoundary = dateFrom ? toUTCStartOfDay(dateFrom) : null;
-  if (!dateFrom || (startBoundary && startBoundary <= new Date(customer.createdAt))) {
-    ledger.push({
-      date: customer.createdAt,
-      description: 'Opening Balance',
-      bags: 0,
-      rate: '—',
-      dueDate: null,
-      debit: customer.openingBalance > 0 ? customer.openingBalance : 0,
-      credit: customer.openingBalance < 0 ? Math.abs(customer.openingBalance) : 0,
-      type: 'opening'
-    });
-  }
-
   // Sales (Dr for customer)
   sales.forEach(s => {
     const itemNames = (s.items && s.items.length > 0)
