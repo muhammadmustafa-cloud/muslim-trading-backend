@@ -186,6 +186,8 @@ export const getHistory = async (req, res) => {
       date: customer.createdAt,
       description: 'Opening Balance',
       bags: 0,
+      rate: '—',
+      dueDate: null,
       debit: customer.openingBalance > 0 ? customer.openingBalance : 0,
       credit: customer.openingBalance < 0 ? Math.abs(customer.openingBalance) : 0,
       type: 'opening'
@@ -202,10 +204,17 @@ export const getHistory = async (req, res) => {
       ? s.items.reduce((sum, it) => sum + (it.kattay || 0), 0)
       : (s.kattay || 0);
 
+    const rates = (s.items && s.items.length > 0)
+      ? s.items.map(it => it.rate).filter(Boolean)
+      : [s.rate].filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString("en-PK")).join(', ') : '—';
+
     ledger.push({
       date: s.date,
       description: `Sale: ${itemNames} (Truck: ${s.truckNumber || 'N/A'})`,
       bags: totalBags,
+      rate: rateStr,
+      dueDate: s.dueDate || null,
       debit: s.totalAmount || 0,
       credit: 0,
       type: 'sale',
@@ -224,13 +233,17 @@ export const getHistory = async (req, res) => {
 
     const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
     const totalBags = matchingItems.reduce((sum, it) => sum + (it.kattay || 0), 0);
-    const totalNet = matchingItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
     const totalAmount = matchingItems.reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+    
+    const rates = matchingItems.map(it => it.rate).filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString("en-PK")).join(', ') : '—';
 
     ledger.push({
       date: ws.date,
       description: `Stock Out to ${ws.customerId?.name || 'Party'}: ${itemNames} (Truck: ${ws.truckNumber || 'N/A'})`,
       bags: totalBags,
+      rate: rateStr,
+      dueDate: ws.dueDate || null,
       debit: 0,
       credit: totalAmount,
       type: 'sale',
@@ -254,10 +267,17 @@ export const getHistory = async (req, res) => {
       ? e.items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
       : Number(e.amount) || 0;
 
+    const rates = (e.items && e.items.length > 0)
+      ? e.items.map(it => it.rate).filter(Boolean)
+      : [e.rate].filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString("en-PK")).join(', ') : '—';
+
     ledger.push({
       date: e.date,
       description: `Purchase: ${itemNames} (Truck: ${e.truckNumber || 'N/A'})`,
       bags: totalBags,
+      rate: rateStr,
+      dueDate: e.dueDate || null,
       debit: 0,
       credit: calculatedAmount,
       type: 'purchase',
@@ -356,6 +376,8 @@ export const getHistory = async (req, res) => {
       date: p.date,
       description: paymentDesc.trim() || 'Transaction',
       bags: 0,
+      rate: '—',
+      dueDate: null,
       debit: isDebit ? amount : 0,
       credit: isCredit ? amount : 0,
       type: 'payment',
