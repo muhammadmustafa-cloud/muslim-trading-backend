@@ -296,7 +296,7 @@ export const getSubItemKhata = async (req, res) => {
   });
 };
 export const getSubItemsSalesSummary = async (req, res) => {
-  const { Item, Sale } = req.models;
+  const { Item, Sale, StockEntry } = req.models;
   const mainItemId = req.params.id;
   const { dateFrom, dateTo } = req.query;
 
@@ -317,8 +317,26 @@ export const getSubItemsSalesSummary = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
+  // 3. Aggregate Purchases (Stock In)
+  const purchasesSummary = await StockEntry.aggregate([
+    { $unwind: '$items' },
+    {
+      $match: {
+        'items.subItemId': { $in: subItemIds },
+        ...(hasDateFilter ? { date: dateFilter } : {})
+      }
+    },
+    {
+      $group: {
+        _id: '$items.subItemId',
+        inWeight: { $sum: '$items.itemNetWeight' },
+        inBags: { $sum: '$items.kattay' }
+      }
+    }
+  ]);
+
   /**
-   * 3. Aggregate sales with "Smart Auto-Link" logic:
+   * 4. Aggregate sales with "Smart Auto-Link" logic:
    * We look for:
    * a) Sales explicitly using a sub-item from our list.
    * b) Sales of ANY item to a Warehouse Customer whose name matches this Main Item.
@@ -382,14 +400,18 @@ export const getSubItemsSalesSummary = async (req, res) => {
     }
   ]);
 
-  // 4. Merge with sub-item names (Summing multiple matches if any)
+  // 5. Merge with sub-item names (Summing multiple matches if any)
   const result = subItems.map(si => {
-    const matchingSummaries = salesSummary.filter(s => 
+    const matchingSales = salesSummary.filter(s => 
       s._id.toString() === si._id.toString() || 
       (typeof s._id === 'string' && s._id === si.name.toLowerCase().trim())
     );
 
-    const merged = matchingSummaries.reduce((acc, curr) => ({
+    const matchingPurchases = purchasesSummary.filter(p =>
+      p._id.toString() === si._id.toString()
+    );
+
+    const salesMerged = matchingSales.reduce((acc, curr) => ({
       inWeight: acc.inWeight + curr.inWeight,
       inBags: acc.inBags + curr.inBags,
       outWeight: acc.outWeight + curr.outWeight,
@@ -398,24 +420,30 @@ export const getSubItemsSalesSummary = async (req, res) => {
       saleCount: acc.saleCount + curr.saleCount
     }), { inWeight: 0, inBags: 0, outWeight: 0, outBags: 0, totalRevenue: 0, saleCount: 0 });
 
-    const inW = merged.inWeight;
-    const outW = merged.outWeight;
+    const purchasesMerged = matchingPurchases.reduce((acc, curr) => ({
+      inWeight: acc.inWeight + curr.inWeight,
+      inBags: acc.inBags + curr.inBags
+    }), { inWeight: 0, inBags: 0 });
+
+    const totalInWeight = salesMerged.inWeight + purchasesMerged.inWeight;
+    const totalInBags = salesMerged.inBags + purchasesMerged.inBags;
+    const outW = salesMerged.outWeight;
     
     return {
       _id: si._id,
       name: si.name,
       quality: si.quality,
-      inBags: merged.inBags,
-      inWeight: inW,
-      inMun: inW / 40,
-      outBags: merged.outBags,
+      inBags: totalInBags,
+      inWeight: totalInWeight,
+      inMun: totalInWeight / 40,
+      outBags: salesMerged.outBags,
       outWeight: outW,
       outMun: outW / 40,
-      balanceBags: merged.inBags - merged.outBags,
-      balanceWeight: inW - outW,
-      balanceMun: (inW - outW) / 40,
-      totalRevenue: merged.totalRevenue,
-      saleCount: merged.saleCount
+      balanceBags: totalInBags - salesMerged.outBags,
+      balanceWeight: totalInWeight - outW,
+      balanceMun: (totalInWeight - outW) / 40,
+      totalRevenue: salesMerged.totalRevenue,
+      saleCount: salesMerged.saleCount
     };
   });
 

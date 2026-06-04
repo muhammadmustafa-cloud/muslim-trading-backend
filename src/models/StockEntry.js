@@ -21,7 +21,8 @@ export const stockEntrySchema = new mongoose.Schema(
       bardanaAmount: { type: Number, default: 0 },
       amount: { type: Number, default: 0 },
       deductionKg: { type: Number, default: 0 },
-      addKg: { type: Number, default: 0 }
+      addKg: { type: Number, default: 0 },
+      subItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', default: null }
     }],
 
     millWeight: { type: Number, default: 0 },

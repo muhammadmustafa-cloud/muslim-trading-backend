@@ -10,6 +10,7 @@ export const list = async (req, res) => {
 
   const entries = await StockEntry.find(filter)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .sort({ date: -1 })
@@ -25,6 +26,7 @@ export const listPending = async (req, res) => {
 
   const entries = await StockEntry.find(filter)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .sort({ dueDate: 1 })
     .lean();
@@ -35,6 +37,7 @@ export const getById = async (req, res) => {
   const { StockEntry } = req.models;
   const entry = await StockEntry.findById(req.params.id)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -128,7 +131,8 @@ export const create = async (req, res) => {
       rate: r,
       bardanaAmount: itemBardana,
       extrasAmount: itemExtra,
-      amount: lineTotal
+      amount: lineTotal,
+      subItemId: item.subItemId || null
     };
   });
 
@@ -181,6 +185,7 @@ export const create = async (req, res) => {
 
   const populated = await StockEntry.findById(entry._id)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -296,7 +301,8 @@ export const update = async (req, res) => {
         rate: r,
         bardanaAmount: itemBardana,
         extrasAmount: itemExtra,
-        amount: lineTotal
+        amount: lineTotal,
+        subItemId: item.subItemId || null
       };
     });
     // Recalculate true total amount factoring in extras, bardana, and mazdori
@@ -343,6 +349,7 @@ export const update = async (req, res) => {
 
   const populated = await StockEntry.findById(entry._id)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
@@ -395,6 +402,7 @@ export const payEntry = async (req, res) => {
 
   const populated = await StockEntry.findById(entry._id)
     .populate({ path: 'items.itemId', select: 'name quality categoryId', populate: { path: 'categoryId', select: 'name' } })
+    .populate('items.subItemId', 'name')
     .populate('supplierId', 'name')
     .populate('accountId', 'name')
     .lean();
