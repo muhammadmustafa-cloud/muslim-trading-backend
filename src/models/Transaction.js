@@ -22,6 +22,7 @@ export const transactionSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ['cash', 'online', 'cheque'], default: 'cash' },
     chequeNumber: { type: String, trim: true, default: '' },
     chequeDate: { type: Date, default: null },
+    isSignatureBook: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

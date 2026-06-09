@@ -47,151 +47,147 @@ function buildDateFilter(dateFrom, dateTo) {
 
 export const list = async (req, res) => {
   const { Transaction, Sale, StockEntry } = req.models;
-  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified, rawMaterialHeadId } = req.query;
+  const { accountId, dateFrom, dateTo, mazdoorId, mazdoorOnly, unified, rawMaterialHeadId, page = 1, limit = 10, sortKey = 'date', sortDir = 'desc', export: isExport, isSignatureBook } = req.query;
   const includeSalesAndStock = unified === 'true' || unified === '1';
 
+  // Pagination & Sorting setup
+  const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+  const sortDirection = sortDir === 'asc' ? 1 : -1;
+  const sortStage = { $sort: { [sortKey]: sortDirection, _id: sortDirection } };
+
+  const id = accountId ? new mongoose.Types.ObjectId(accountId) : null;
+  const dateF = buildDateFilter(dateFrom, dateTo);
+
   if (includeSalesAndStock) {
-    const id = accountId ? new mongoose.Types.ObjectId(accountId) : null;
-    const dateF = buildDateFilter(dateFrom, dateTo);
+    const transMatch = { ...dateF, type: { $ne: 'accrual' } };
+    if (id) transMatch.$or = [{ fromAccountId: id }, { toAccountId: id }];
+    if (mazdoorId) transMatch.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+    else if (mazdoorOnly === 'true' || mazdoorOnly === true) transMatch.mazdoorId = { $ne: null };
+    if (rawMaterialHeadId) transMatch.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
+    if (isSignatureBook === 'true') transMatch.isSignatureBook = true;
 
+    const pipeline = [
+      { $match: transMatch },
+      { $project: {
+          date: 1, type: 1, fromAccountId: 1, toAccountId: 1, amount: 1,
+          category: 1, note: 1, source: { $literal: 'transaction' },
+          referenceId: '$_id', supplierId: 1, customerId: 1, mazdoorId: 1,
+          stockEntryId: 1, saleId: 1, machineryPurchaseId: 1,
+          taxTypeId: 1, expenseTypeId: 1, rawMaterialHeadId: 1
+      } }
+    ];
 
-    const [transactions, sales, stockEntries] = await Promise.all([
-      (() => {
-        const filter = { ...dateF, type: { $ne: 'accrual' } };
-        if (id) filter.$or = [{ fromAccountId: id }, { toAccountId: id }];
-        if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
-        else if (mazdoorOnly === 'true' || mazdoorOnly === true) filter.mazdoorId = { $ne: null };
-        if (rawMaterialHeadId) filter.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
-        return Transaction.find(filter)
-          .populate('fromAccountId', 'name')
-          .populate('toAccountId', 'name')
-          .populate('supplierId', 'name')
-          .populate('customerId', 'name')
-          .populate('mazdoorId', 'name')
-          .populate('stockEntryId')
-          .populate('saleId')
-          .populate('taxTypeId', 'name')
-          .populate('expenseTypeId', 'name')
-          .populate('rawMaterialHeadId', 'name')
-          .sort({ date: -1 })
-          .lean();
-      })(),
-      (() => {
-        if (rawMaterialHeadId) return []; // Raw Material filtering is only for transactions
-        const filter = { ...dateF, amountReceived: { $gt: 0 } };
-        if (id) filter.accountId = id;
-        return Sale.find(filter)
-          .populate('customerId', 'name')
-          .populate('accountId', 'name')
-          .populate('items.itemId', 'name')
-          .sort({ date: -1 })
-          .lean();
-      })(),
-      (() => {
-        if (rawMaterialHeadId) return []; // Raw Material filtering is only for transactions
-        const filter = { ...dateF, $or: [{ amountPaid: { $gt: 0 } }, { amount: { $gt: 0 } }] };
-        if (id) filter.accountId = id;
-        return StockEntry.find(filter)
-          .populate('supplierId', 'name')
-          .populate('accountId', 'name')
-          .populate('items.itemId', 'name')
-          .sort({ date: -1 })
-          .lean();
-      })(),
+    if (!rawMaterialHeadId) {
+      const saleMatch = { ...dateF, amountReceived: { $gt: 0 } };
+      if (id) saleMatch.accountId = id;
+      pipeline.push({
+        $unionWith: {
+          coll: Sale.collection.name,
+          pipeline: [
+            { $match: saleMatch },
+            { $project: {
+                _id: { $concat: ["sale-", { $toString: "$_id" }] },
+                date: 1, type: { $literal: 'sale' }, fromAccountId: { $literal: null },
+                toAccountId: '$accountId', amount: '$amountReceived',
+                category: { $literal: 'Sale' }, source: { $literal: 'sale' },
+                referenceId: '$_id', customerId: 1, notes: 1, items: 1, itemId: 1
+            } }
+          ]
+        }
+      });
+
+      const stockMatch = { ...dateF, $or: [{ amountPaid: { $gt: 0 } }, { amount: { $gt: 0 } }] };
+      if (id) stockMatch.accountId = id;
+      pipeline.push({
+        $unionWith: {
+          coll: StockEntry.collection.name,
+          pipeline: [
+            { $match: stockMatch },
+            { $project: {
+                _id: { $concat: ["stock-", { $toString: "$_id" }] },
+                date: 1, type: { $literal: 'purchase' }, fromAccountId: '$accountId',
+                toAccountId: { $literal: null },
+                amount: { $cond: [{ $gt: ["$amountPaid", 0] }, "$amountPaid", "$amount"] },
+                category: { $literal: 'Purchase' }, source: { $literal: 'stock_entry' },
+                referenceId: '$_id', supplierId: 1, notes: 1, items: 1, itemId: 1
+            } }
+          ]
+        }
+      });
+    }
+
+    pipeline.push(sortStage);
+
+    const facetStage = {
+      $facet: {
+        metadata: [{ $count: "total" }],
+        data: []
+      }
+    };
+    if (isExport !== 'true' && isExport !== true) {
+      facetStage.$facet.data.push({ $skip: skip });
+      facetStage.$facet.data.push({ $limit: parseInt(limit) });
+    }
+    pipeline.push(facetStage);
+
+    const [result] = await Transaction.aggregate(pipeline);
+    const totalCount = result.metadata[0]?.total || 0;
+    let data = result.data || [];
+
+    await Transaction.populate(data, [
+      { path: 'fromAccountId', select: 'name' },
+      { path: 'toAccountId', select: 'name' },
+      { path: 'supplierId', select: 'name' },
+      { path: 'customerId', select: 'name' },
+      { path: 'mazdoorId', select: 'name' },
+      { path: 'taxTypeId', select: 'name' },
+      { path: 'expenseTypeId', select: 'name' },
+      { path: 'rawMaterialHeadId', select: 'name' },
+      { path: 'stockEntryId' },
+      { path: 'saleId' },
+      { path: 'machineryPurchaseId', populate: { path: 'machineryItemId', select: 'name' } },
+      { path: 'items.itemId', select: 'name', model: 'Item' },
+      { path: 'itemId', select: 'name', model: 'Item' }
     ]);
 
-    const rows = [];
-    transactions.forEach((t) => {
-      rows.push({
-        _id: t._id,
-        date: t.date,
-        type: t.type,
-        fromAccountId: t.fromAccountId,
-        toAccountId: t.toAccountId,
-        amount: t.amount,
-        category: t.category || '',
-        note: t.note || '',
-        source: 'transaction',
-        referenceId: t._id,
-        supplierName: t.supplierId?.name || '',
-        customerName: t.customerId?.name || '',
-        mazdoorName: t.mazdoorId?.name || '',
-        stockEntryId: t.stockEntryId,
-        saleId: t.saleId,
-        machineryPurchaseId: t.machineryPurchaseId,
-        taxTypeId: t.taxTypeId,
-        taxTypeName: t.taxTypeId?.name || '',
-        expenseTypeId: t.expenseTypeId,
-        expenseTypeName: t.expenseTypeId?.name || '',
-        rawMaterialHeadId: t.rawMaterialHeadId,
-        rawMaterialHeadName: t.rawMaterialHeadId?.name || '',
-      });
-    });
-    sales.forEach((s) => {
-      const amt = Number(s.amountReceived) || 0;
-      if (amt <= 0 || !s.accountId) return;
-      rows.push({
-        _id: `sale-${s._id}`,
-        date: s.date,
-        type: 'sale',
-        fromAccountId: null,
-        toAccountId: s.accountId,
-        amount: amt,
-        category: 'Sale',
-        note: (s.notes || '').trim() || (s.customerId?.name ? `Customer: ${s.customerId.name}` : ''),
-        source: 'sale',
-        referenceId: s._id,
-        customerName: s.customerId?.name,
-        itemName: (s.items && s.items.length > 0) ? s.items.map(it => it.itemId?.name || 'Item').join(', ') : (s.itemId?.name || 'Item'),
-      });
-    });
-    stockEntries.forEach((e) => {
-      const amt = Number(e.amountPaid) || Number(e.amount) || 0;
-      if (amt <= 0 || !e.accountId) return;
-      rows.push({
-        _id: `stock-${e._id}`,
-        date: e.date,
-        type: 'purchase',
-        fromAccountId: e.accountId,
-        toAccountId: null,
-        amount: amt,
-        category: 'Purchase',
-        note: (e.notes || '').trim() || (e.supplierId?.name ? `Supplier: ${e.supplierId.name}` : ''),
-        source: 'stock_entry',
-        referenceId: e._id,
-        supplierName: e.supplierId?.name,
-        itemName: (e.items && e.items.length > 0) ? e.items.map(it => it.itemId?.name || 'Item').join(', ') : (e.itemId?.name || 'Item'),
-      });
+    const rows = data.map(doc => {
+      const row = { ...doc };
+      
+      row.supplierName = row.supplierId?.name || '';
+      row.customerName = row.customerId?.name || '';
+      row.mazdoorName = row.mazdoorId?.name || '';
+      row.taxTypeName = row.taxTypeId?.name || '';
+      row.expenseTypeName = row.expenseTypeId?.name || '';
+      row.rawMaterialHeadName = row.rawMaterialHeadId?.name || '';
+
+      if (row.source === 'sale') {
+        row.note = (row.notes || '').trim() || (row.customerName ? `Customer: ${row.customerName}` : '');
+        row.itemName = (row.items && row.items.length > 0) ? row.items.map(it => it.itemId?.name || 'Item').join(', ') : (row.itemId?.name || 'Item');
+      } else if (row.source === 'stock_entry') {
+        row.note = (row.notes || '').trim() || (row.supplierName ? `Supplier: ${row.supplierName}` : '');
+        row.itemName = (row.items && row.items.length > 0) ? row.items.map(it => it.itemId?.name || 'Item').join(', ') : (row.itemId?.name || 'Item');
+      }
+
+      delete row.notes;
+      delete row.items;
+      delete row.itemId;
+      
+      return row;
     });
 
-    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return res.json({ success: true, data: rows });
+    return res.json({ success: true, data: rows, totalCount });
   }
 
+  // Non-unified branch
+  const filter = { type: { $ne: 'accrual' }, ...dateF };
+  if (id) filter.$or = [{ fromAccountId: id }, { toAccountId: id }];
+  if (mazdoorId) filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
+  else if (mazdoorOnly === 'true' || mazdoorOnly === true) filter.mazdoorId = { $ne: null };
+  if (rawMaterialHeadId) filter.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
+  if (isSignatureBook === 'true') filter.isSignatureBook = true;
 
-  const filter = {};
-
-  if (accountId) {
-    const id = new mongoose.Types.ObjectId(accountId);
-    filter.$or = [
-      { fromAccountId: id },
-      { toAccountId: id },
-    ];
-  }
-  if (mazdoorId) {
-    filter.mazdoorId = new mongoose.Types.ObjectId(mazdoorId);
-  } else if (mazdoorOnly === 'true' || mazdoorOnly === true) {
-    filter.mazdoorId = { $ne: null };
-  }
-  if (rawMaterialHeadId) {
-    filter.rawMaterialHeadId = new mongoose.Types.ObjectId(rawMaterialHeadId);
-  }
-  filter.type = { $ne: 'accrual' };
-  if (dateFrom || dateTo) {
-    Object.assign(filter, buildDateFilter(dateFrom, dateTo));
-  }
-
-  const transactions = await Transaction.find(filter)
+  const totalCount = await Transaction.countDocuments(filter);
+  let query = Transaction.find(filter)
     .populate('fromAccountId', 'name')
     .populate('toAccountId', 'name')
     .populate('supplierId', 'name')
@@ -202,14 +198,21 @@ export const list = async (req, res) => {
     .populate('taxTypeId', 'name')
     .populate('expenseTypeId', 'name')
     .populate('rawMaterialHeadId', 'name')
-    .sort({ date: -1 })
+    .populate({ path: 'machineryPurchaseId', populate: { path: 'machineryItemId', select: 'name' } })
+    .sort({ [sortKey]: sortDirection, _id: sortDirection })
     .lean();
-  res.json({ success: true, data: transactions });
+
+  if (isExport !== 'true' && isExport !== true) {
+    query = query.skip(skip).limit(parseInt(limit));
+  }
+  
+  const transactions = await query;
+  res.json({ success: true, data: transactions, totalCount });
 };
 
 export const create = async (req, res) => {
   const { Transaction } = req.models;
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate, isSignatureBook } = req.body;
   if (!type || !['deposit', 'withdraw', 'transfer', 'accrual', 'salary', 'tax', 'expense'].includes(type)) {
     return res.status(400).json({ success: false, message: 'type must be deposit, withdraw, transfer, accrual, salary, tax, or expense' });
   }
@@ -272,6 +275,7 @@ export const create = async (req, res) => {
     paymentMethod: paymentMethod || 'cash',
     chequeNumber: (chequeNumber || '').trim(),
     chequeDate: chequeDate ? new Date(chequeDate) : null,
+    isSignatureBook: isSignatureBook === 'true' || isSignatureBook === true,
   });
 
   const populated = await Transaction.findById(transaction._id)
@@ -308,7 +312,7 @@ export const getById = async (req, res) => {
 export const update = async (req, res) => {
   const { Transaction } = req.models;
   const { id } = req.params;
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate, isSignatureBook } = req.body;
 
   const transaction = await Transaction.findById(id);
   if (!transaction) {
@@ -352,6 +356,9 @@ export const update = async (req, res) => {
   transaction.paymentMethod = paymentMethod || 'cash';
   transaction.chequeNumber = (chequeNumber || '').trim();
   transaction.chequeDate = chequeDate ? new Date(chequeDate) : null;
+  if (isSignatureBook !== undefined) {
+    transaction.isSignatureBook = isSignatureBook === 'true' || isSignatureBook === true;
+  }
 
   if (req.file) {
     transaction.image = req.file.path;
