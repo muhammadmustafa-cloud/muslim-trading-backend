@@ -73,7 +73,8 @@ export const list = async (req, res) => {
           category: 1, note: 1, source: { $literal: 'transaction' },
           referenceId: '$_id', supplierId: 1, customerId: 1, mazdoorId: 1,
           stockEntryId: 1, saleId: 1, machineryPurchaseId: 1,
-          taxTypeId: 1, expenseTypeId: 1, rawMaterialHeadId: 1
+          taxTypeId: 1, expenseTypeId: 1, rawMaterialHeadId: 1,
+          isSignatureBook: 1, paymentMethod: 1, chequeNumber: 1, chequeDate: 1
       } }
     ];
 
