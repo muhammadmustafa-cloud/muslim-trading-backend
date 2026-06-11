@@ -147,12 +147,27 @@ export const getHistory = async (req, res) => {
   } : null;
   if (warehouseSaleMatch && hasDateFilter) warehouseSaleMatch.date = dateFilter;
 
+  // Query for purchases where this warehouse's item was bought (Debit side)
+  const warehousePurchaseMatch = (linkedItemIds.length > 0) ? {
+    $or: [
+      { 'items.itemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } },
+      { 'items.subItemId': { $in: linkedItemIds.map(id => new mongoose.Types.ObjectId(id)) } }
+    ]
+  } : null;
+  if (warehousePurchaseMatch && hasDateFilter) warehousePurchaseMatch.date = dateFilter;
+
   // 2. Fetch all data in parallel
-  const [sales, warehouseSales, stockEntries, transactions] = await Promise.all([
+  const [sales, warehouseSales, warehousePurchases, stockEntries, transactions] = await Promise.all([
     Sale.find(saleMatch).populate('items.itemId', 'name').populate('accountId', 'name').lean(),
     warehouseSaleMatch
       ? Sale.find(warehouseSaleMatch)
           .populate('customerId', 'name')
+          .populate({ path: 'items.itemId', select: 'name quality' })
+          .lean()
+      : [],
+    warehousePurchaseMatch
+      ? StockEntry.find(warehousePurchaseMatch)
+          .populate('supplierId', 'name')
           .populate({ path: 'items.itemId', select: 'name quality' })
           .lean()
       : [],
@@ -234,6 +249,37 @@ export const getHistory = async (req, res) => {
       credit: totalAmount,
       type: 'sale',
       refId: ws._id
+    });
+  });
+
+  // Warehouse Purchases (Dr for warehouse customer — stock came IN to their warehouse)
+  warehousePurchases.forEach(wp => {
+    // Only count items that are linked to THIS warehouse customer
+    const matchingItems = wp.items?.filter(it => {
+      const mainId = it.itemId?._id?.toString() || it.itemId?.toString();
+      const subId = it.subItemId?._id?.toString() || it.subItemId?.toString();
+      return linkedItemIds.includes(mainId) || (subId && linkedItemIds.includes(subId));
+    }) || [];
+
+    if (matchingItems.length === 0) return;
+
+    const itemNames = matchingItems.map(it => it.itemId?.name || 'Item').join(', ');
+    const totalBags = matchingItems.reduce((sum, it) => sum + (it.kattay || 0), 0);
+    const totalAmount = matchingItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+
+    const rates = matchingItems.map(it => it.rate).filter(Boolean);
+    const rateStr = rates.length > 0 ? rates.map(r => r.toLocaleString('en-PK')).join(', ') : '—';
+
+    ledger.push({
+      date: wp.date,
+      description: `Stock In from ${wp.supplierId?.name || 'Supplier'}: ${itemNames} (Truck: ${wp.truckNumber || 'N/A'})`,
+      bags: totalBags,
+      rate: rateStr,
+      dueDate: null,
+      debit: totalAmount,  // Debit: warehouse owes for stock received
+      credit: 0,
+      type: 'purchase',
+      refId: wp._id
     });
   });
 
