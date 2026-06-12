@@ -17,6 +17,7 @@ import { mazdoorItemSchema } from './MazdoorItem.js';
 import { millExpenseSchema } from './MillExpense.js';
 import { rawMaterialHeadSchema } from './RawMaterialHead.js';
 import { taxTypeSchema } from './TaxType.js';
+import { scannedDocumentSchema } from './ScannedDocument.js';
 
 export const registerAllModels = (conn) => {
   const modelDefinitions = [
@@ -39,6 +40,7 @@ export const registerAllModels = (conn) => {
     { name: 'MillExpense', schema: millExpenseSchema },
     { name: 'RawMaterialHead', schema: rawMaterialHeadSchema },
     { name: 'TaxType', schema: taxTypeSchema },
+    { name: 'ScannedDocument', schema: scannedDocumentSchema },
   ];
 
   modelDefinitions.forEach(({ name, schema }) => {

@@ -26,4 +26,5 @@ export const createModelDefinitions = (conn) => ({
   MillExpense:       conn.model('MillExpense'),
   RawMaterialHead:   conn.model('RawMaterialHead'),
   TaxType:           conn.model('TaxType'),
+  ScannedDocument:   conn.model('ScannedDocument'),
 });

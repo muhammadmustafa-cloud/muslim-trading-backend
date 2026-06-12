@@ -25,6 +25,7 @@ import userRoutes from './userRoutes.js';
 import rawMaterialHeadRoutes from './rawMaterialHeadRoutes.js';
 import migrationRoutes from './migrationRoutes.js';
 import partyLedgerRoutes from './partyLedgerRoutes.js';
+import scannedDocumentRoutes from './scannedDocumentRoutes.js';
 
 const router = Router();
 
@@ -54,6 +55,7 @@ router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/raw-material-heads', rawMaterialHeadRoutes);
 router.use('/migration', migrationRoutes);
+router.use('/scanned-documents', scannedDocumentRoutes);
 
 // Base API info
 router.get('/', (req, res) => {
