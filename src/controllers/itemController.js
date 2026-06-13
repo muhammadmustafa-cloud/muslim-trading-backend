@@ -450,6 +450,187 @@ export const getSubItemsSalesSummary = async (req, res) => {
   res.json({ success: true, data: result });
 };
 
+export const getWarehouseItemLedger = async (req, res) => {
+  const { Item, Sale, StockEntry } = req.models;
+  const mainItemId = req.params.id;
+  
+  const mainItem = await Item.findById(mainItemId).lean();
+  if (!mainItem) return res.status(404).json({ success: false, message: 'Main Item not found' });
+
+  const subItems = await Item.find({ parentId: mainItemId }).lean();
+  const subItemIds = subItems.map(si => si._id);
+
+  const { dateFrom, dateTo, filterSubItemId } = req.query;
+  const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
+  const dateFilter = dateFilterObj.date || {};
+  const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+  let allIdsToCheck = [mainItem._id];
+  if (filterSubItemId) {
+    allIdsToCheck.push(new mongoose.Types.ObjectId(filterSubItemId));
+  } else {
+    allIdsToCheck.push(...subItemIds);
+  }
+
+  // 1. Stock Entries (Purchases / Supplier IN / Customer Return IN)
+  const purchasesRaw = await StockEntry.aggregate([
+    { $unwind: '$items' },
+    { $match: { 
+        $or: [
+          { 'items.itemId': { $in: allIdsToCheck } },
+          { 'items.subItemId': { $in: allIdsToCheck } }
+        ],
+        ...(hasDateFilter ? { date: dateFilter } : {})
+    }},
+    { $lookup: { from: 'suppliers', localField: 'supplierId', foreignField: '_id', as: 'supplierDoc' } },
+    { $unwind: { path: '$supplierDoc', preserveNullAndEmptyArrays: true } },
+    { $sort: { date: 1 } } 
+  ]);
+
+  // 2. Sales (OUT to Normal Customers, IN to Warehouse Customers)
+  const salesRaw = await Sale.aggregate([
+    { $unwind: '$items' },
+    { $match: { 
+        $or: [
+          { 'items.itemId': { $in: allIdsToCheck } },
+          { 'items.subItemId': { $in: allIdsToCheck } }
+        ],
+        ...(hasDateFilter ? { date: dateFilter } : {})
+    }},
+    { $lookup: { from: 'customers', localField: 'customerId', foreignField: '_id', as: 'customerDoc' } },
+    { $unwind: { path: '$customerDoc', preserveNullAndEmptyArrays: true } },
+    { $sort: { date: 1 } }
+  ]);
+
+  const ledger = [];
+  let balanceBags = 0;
+  let balanceWeight = 0;
+
+  purchasesRaw.forEach(p => {
+    const itm = p.items;
+    const bags = Number(itm.kattay) || 0;
+    
+    let weight = Number(itm.itemNetWeight) || 0;
+    const rateVal = Number(itm.rate) || 0;
+    const amt = Number(itm.amount) || 0;
+    if (weight === 0 && rateVal > 0 && amt > 0) {
+      weight = (amt / rateVal) * 40;
+    }
+
+    const subItemName = subItems.find(si => si._id.toString() === (itm.subItemId?.toString() || ''))?.name;
+    const itemName = subItemName ? subItemName : mainItem.name;
+
+    ledger.push({
+      _id: p._id.toString() + '-' + (itm._id ? itm._id.toString() : Math.random()),
+      date: p.date,
+      type: 'IN',
+      source: 'Purchase / Entry',
+      partyName: p.supplierDoc ? p.supplierDoc.name : 'Supplier',
+      itemName: itemName,
+      bagsIn: bags,
+      weightIn: weight,
+      bagsOut: 0,
+      weightOut: 0,
+      rate: rateVal,
+      amount: amt,
+      note: p.notes || ''
+    });
+  });
+
+  salesRaw.forEach(s => {
+    const itm = s.items;
+    const bags = Number(itm.kattay) || 0;
+    
+    let weight = Number(itm.quantity) || 0;
+    const rateVal = Number(itm.rate) || 0;
+    const totalAmt = Number(itm.totalAmount) || 0;
+    if (weight === 0 && rateVal > 0 && totalAmt > 0) {
+      weight = (totalAmt / rateVal) * 40;
+    }
+    
+    // Check if Sale to Warehouse
+    const isSaleToWarehouse = s.customerDoc && s.customerDoc.isWarehouse && s.customerDoc.name.toLowerCase().trim() === mainItem.name.toLowerCase().trim();
+
+    const subItemName = subItems.find(si => si._id.toString() === (itm.subItemId?.toString() || ''))?.name;
+    const itemName = subItemName ? subItemName : mainItem.name;
+
+    if (isSaleToWarehouse) {
+      ledger.push({
+        _id: s._id.toString() + '-' + (itm._id ? itm._id.toString() : Math.random()),
+        date: s.date,
+        type: 'IN',
+        source: 'Warehouse Arrival',
+        partyName: 'Warehouse (' + (s.customerDoc ? s.customerDoc.name : '') + ')',
+        itemName: itemName,
+        bagsIn: bags,
+        weightIn: weight,
+        bagsOut: 0,
+        weightOut: 0,
+        rate: rateVal,
+        amount: totalAmt,
+        note: s.notes || ''
+      });
+    } else {
+      ledger.push({
+        _id: s._id.toString() + '-' + (itm._id ? itm._id.toString() : Math.random()),
+        date: s.date,
+        type: 'OUT',
+        source: 'Sale',
+        partyName: s.customerDoc ? s.customerDoc.name : 'Customer',
+        itemName: itemName,
+        bagsIn: 0,
+        weightIn: 0,
+        bagsOut: bags,
+        weightOut: weight,
+        rate: rateVal,
+        amount: totalAmt,
+        note: s.notes || ''
+      });
+    }
+  });
+
+  // Sort by Date Ascending to calculate running balance correctly
+  ledger.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let totalInBags = 0;
+  let totalInWeight = 0;
+  let totalOutBags = 0;
+  let totalOutWeight = 0;
+
+  ledger.forEach(entry => {
+    if (entry.type === 'IN') {
+      balanceBags += entry.bagsIn;
+      balanceWeight += entry.weightIn;
+      totalInBags += entry.bagsIn;
+      totalInWeight += entry.weightIn;
+    } else {
+      balanceBags -= entry.bagsOut;
+      balanceWeight -= entry.weightOut;
+      totalOutBags += entry.bagsOut;
+      totalOutWeight += entry.weightOut;
+    }
+    entry.balanceBags = balanceBags;
+    entry.balanceWeight = balanceWeight;
+  });
+
+  res.json({
+    success: true,
+    data: {
+      itemName: mainItem.name,
+      subItemsList: subItems.map(si => ({ _id: si._id, name: si.name, quality: si.quality })),
+      ledger: ledger.reverse(), // Reverse to show latest on top in UI
+      totals: {
+        totalInBags,
+        totalInWeight,
+        totalOutBags,
+        totalOutWeight,
+        balanceBags,
+        balanceWeight
+      }
+    }
+  });
+};
+
 export const remove = async (req, res) => {
   const { Item, Sale, StockEntry } = req.models;
   const itemId = req.params.id;

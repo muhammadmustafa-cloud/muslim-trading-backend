@@ -9,6 +9,7 @@ router.get('/', protect, asyncHandler(itemController.list));
 router.get('/:id/khata', protect, asyncHandler(itemController.getKhata));
 router.get('/:id/sub-khata', protect, asyncHandler(itemController.getSubItemKhata));
 router.get('/:id/sub-items-summary', protect, asyncHandler(itemController.getSubItemsSalesSummary));
+router.get('/:id/warehouse-ledger', protect, asyncHandler(itemController.getWarehouseItemLedger));
 router.get('/:id', protect, asyncHandler(itemController.getById));
 router.post('/', protect, superAdminOnly, asyncHandler(itemController.create));
 router.put('/:id', protect, superAdminOnly, asyncHandler(itemController.update));
