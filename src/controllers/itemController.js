@@ -465,21 +465,24 @@ export const getWarehouseItemLedger = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-  let allIdsToCheck = [mainItem._id];
+  let itemMatchCondition = {};
   if (filterSubItemId) {
-    allIdsToCheck.push(new mongoose.Types.ObjectId(filterSubItemId));
+    itemMatchCondition = { 'items.subItemId': new mongoose.Types.ObjectId(filterSubItemId) };
   } else {
-    allIdsToCheck.push(...subItemIds);
+    let allIdsToCheck = [mainItem._id, ...subItemIds];
+    itemMatchCondition = {
+      $or: [
+        { 'items.itemId': { $in: allIdsToCheck } },
+        { 'items.subItemId': { $in: allIdsToCheck } }
+      ]
+    };
   }
 
   // 1. Stock Entries (Purchases / Supplier IN / Customer Return IN)
   const purchasesRaw = await StockEntry.aggregate([
     { $unwind: '$items' },
     { $match: { 
-        $or: [
-          { 'items.itemId': { $in: allIdsToCheck } },
-          { 'items.subItemId': { $in: allIdsToCheck } }
-        ],
+        ...itemMatchCondition,
         ...(hasDateFilter ? { date: dateFilter } : {})
     }},
     { $lookup: { from: 'suppliers', localField: 'supplierId', foreignField: '_id', as: 'supplierDoc' } },
@@ -491,10 +494,7 @@ export const getWarehouseItemLedger = async (req, res) => {
   const salesRaw = await Sale.aggregate([
     { $unwind: '$items' },
     { $match: { 
-        $or: [
-          { 'items.itemId': { $in: allIdsToCheck } },
-          { 'items.subItemId': { $in: allIdsToCheck } }
-        ],
+        ...itemMatchCondition,
         ...(hasDateFilter ? { date: dateFilter } : {})
     }},
     { $lookup: { from: 'customers', localField: 'customerId', foreignField: '_id', as: 'customerDoc' } },
@@ -533,7 +533,8 @@ export const getWarehouseItemLedger = async (req, res) => {
       weightOut: 0,
       rate: rateVal,
       amount: amt,
-      note: p.notes || ''
+      note: p.notes || '',
+      truckNumber: p.truckNumber || ''
     });
   });
 
@@ -568,7 +569,8 @@ export const getWarehouseItemLedger = async (req, res) => {
         weightOut: 0,
         rate: rateVal,
         amount: totalAmt,
-        note: s.notes || ''
+        note: s.notes || '',
+        truckNumber: s.truckNumber || ''
       });
     } else {
       ledger.push({
@@ -584,7 +586,8 @@ export const getWarehouseItemLedger = async (req, res) => {
         weightOut: weight,
         rate: rateVal,
         amount: totalAmt,
-        note: s.notes || ''
+        note: s.notes || '',
+        truckNumber: s.truckNumber || ''
       });
     }
   });
