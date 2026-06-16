@@ -372,11 +372,14 @@ export const getSubItemsSalesSummary = async (req, res) => {
         $or: [
           // Case A: Explicitly linked sub-item
           { 'items.subItemId': { $in: subItemIds } },
-          // Case B: Sale of a Main Item to THIS Warehouse Customer (by name)
+          // Case B: Sale of a Main Item to THIS Warehouse Customer (by explicit link OR name fallback - Handles inverted data structure)
           { 
             'customerDoc.isWarehouse': true, 
-            'customerDoc.name': mainItem.name,
-            'lineItemDoc.name': { $in: subItems.map(si => si.name) } 
+            $or: [
+              { 'customerDoc._id': mainItem.linkedWarehouseCustomerId },
+              { 'customerDoc.name': new RegExp(`^${mainItem.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') }
+            ],
+            'lineItemDoc.name': { $in: subItems.map(si => new RegExp(`^${si.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i')) } 
           }
         ]
       }
@@ -465,24 +468,104 @@ export const getWarehouseItemLedger = async (req, res) => {
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
 
+  // Build unified subItemsList (Dropdown List) using string NAME as _id
+  const allMainItems = await Item.find({ parentId: null }).lean();
+  
+  const uniqueNamesMap = new Map();
+  const dropdownList = [];
+
+  // Add all sub-items
+  for (const si of subItems) {
+    const nameLower = si.name.toLowerCase().trim();
+    if (!uniqueNamesMap.has(nameLower)) {
+      uniqueNamesMap.set(nameLower, true);
+      dropdownList.push({ _id: si.name, name: si.name, quality: si.quality });
+    }
+  }
+
+  // Add all main items (except the warehouse itself)
+  for (const mi of allMainItems) {
+    if (mi._id.toString() === mainItemId) continue;
+    
+    const nameLower = mi.name.toLowerCase().trim();
+    if (!uniqueNamesMap.has(nameLower)) {
+      uniqueNamesMap.set(nameLower, true);
+      dropdownList.push({ _id: mi.name, name: mi.name, quality: mi.quality });
+    }
+  }
+
+  // Sort dropdown list alphabetically
+  dropdownList.sort((a, b) => a.name.localeCompare(b.name));
+
   let itemMatchCondition = {};
+  let matchingMainItemIds = [];
+
   if (filterSubItemId) {
-    itemMatchCondition = { 'items.subItemId': new mongoose.Types.ObjectId(filterSubItemId) };
+    // filterSubItemId is now a Name string (e.g. "Chamri")
+    const filterName = String(filterSubItemId).trim();
+
+    // 1. Find matching Sub-Items (by name)
+    const matchingSiIds = subItems
+      .filter(si => si.name.toLowerCase().trim() === filterName.toLowerCase())
+      .map(si => si._id);
+    
+    if (matchingSiIds.length > 0) {
+      itemMatchCondition = { 'items.subItemId': { $in: matchingSiIds } };
+    } else {
+      itemMatchCondition = { _id: null }; // force no match on subItems
+    }
+
+    // 2. Find matching Main Items (by name)
+    const matchingMainItemsFilter = await Item.find({ 
+      parentId: null, 
+      name: new RegExp(`^${filterName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') 
+    }).lean();
+    matchingMainItemIds = matchingMainItemsFilter.map(i => i._id);
+
   } else {
+    // All Items (Combined)
     let allIdsToCheck = [mainItem._id, ...subItemIds];
     itemMatchCondition = {
       $or: [
         { 'items.itemId': { $in: allIdsToCheck } },
-        { 'items.subItemId': { $in: allIdsToCheck } }
+        { 'items.subItemId': { $in: subItemIds } }
       ]
     };
+
+    // Find ALL Main Items that are in the dropdown list to include ALL possible INs
+    const allNames = dropdownList.map(d => d.name);
+    if (allNames.length > 0) {
+      const matchingMainItemsAll = await Item.find({ 
+        parentId: null, 
+        name: { $in: allNames.map(name => new RegExp(`^${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i')) }
+      }).lean();
+      matchingMainItemIds = matchingMainItemsAll.map(i => i._id);
+    }
   }
+
+  // Find the warehouse customer IDs
+  const matchingCustomers = await req.models.Customer.find({ 
+    isWarehouse: true, 
+    name: new RegExp(`^${mainItem.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') 
+  }).lean();
+  const matchingCustomerIds = matchingCustomers.map(c => c._id);
+
+  const extendedMatchCondition = {
+    $or: [
+      itemMatchCondition,
+      {
+        customerId: { $in: matchingCustomerIds },
+        'items.itemId': { $in: matchingMainItemIds }
+      }
+    ]
+  };
+  // -------------------------------------------------------------------------------
 
   // 1. Stock Entries (Purchases / Supplier IN / Customer Return IN)
   const purchasesRaw = await StockEntry.aggregate([
     { $unwind: '$items' },
     { $match: { 
-        ...itemMatchCondition,
+        ...itemMatchCondition, // Normal match for stock entries
         ...(hasDateFilter ? { date: dateFilter } : {})
     }},
     { $lookup: { from: 'suppliers', localField: 'supplierId', foreignField: '_id', as: 'supplierDoc' } },
@@ -494,11 +577,13 @@ export const getWarehouseItemLedger = async (req, res) => {
   const salesRaw = await Sale.aggregate([
     { $unwind: '$items' },
     { $match: { 
-        ...itemMatchCondition,
+        ...extendedMatchCondition, // Extended match to catch inverted data structure INs
         ...(hasDateFilter ? { date: dateFilter } : {})
     }},
     { $lookup: { from: 'customers', localField: 'customerId', foreignField: '_id', as: 'customerDoc' } },
     { $unwind: { path: '$customerDoc', preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: 'items', localField: 'items.itemId', foreignField: '_id', as: 'lineItemDoc' } },
+    { $unwind: { path: '$lineItemDoc', preserveNullAndEmptyArrays: true } },
     { $sort: { date: 1 } }
   ]);
 
@@ -549,11 +634,12 @@ export const getWarehouseItemLedger = async (req, res) => {
       weight = (totalAmt / rateVal) * 40;
     }
     
-    // Check if Sale to Warehouse
-    const isSaleToWarehouse = s.customerDoc && s.customerDoc.isWarehouse && s.customerDoc.name.toLowerCase().trim() === mainItem.name.toLowerCase().trim();
+    // Check if Sale to Warehouse (ANY warehouse is considered an internal transfer for this item)
+    const isSaleToWarehouse = s.customerDoc && s.customerDoc.isWarehouse;
 
     const subItemName = subItems.find(si => si._id.toString() === (itm.subItemId?.toString() || ''))?.name;
-    const itemName = subItemName ? subItemName : mainItem.name;
+    // Extract item name considering inverted data structure
+    const itemName = subItemName ? subItemName : (s.lineItemDoc ? s.lineItemDoc.name : mainItem.name);
 
     if (isSaleToWarehouse) {
       ledger.push({
@@ -616,11 +702,11 @@ export const getWarehouseItemLedger = async (req, res) => {
     entry.balanceWeight = balanceWeight;
   });
 
-  res.json({
+  return res.json({
     success: true,
     data: {
       itemName: mainItem.name,
-      subItemsList: subItems.map(si => ({ _id: si._id, name: si.name, quality: si.quality })),
+      subItemsList: dropdownList,
       ledger: ledger.reverse(), // Reverse to show latest on top in UI
       totals: {
         totalInBags,
