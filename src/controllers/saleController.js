@@ -284,7 +284,8 @@ export const create = async (req, res) => {
     notes: (notes || '').trim(),
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus,
-    image: req.file ? req.file.path : null,
+    image: req.files && req.files.length > 0 ? req.files[0].path : null,
+    images: req.files ? req.files.map(f => f.path) : [],
   });
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
@@ -318,7 +319,17 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Sale not found' });
   }
 
-  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate } = req.body;
+  let { date, customerId, items, totalGrossWeight, totalSHCut, amountReceived, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, dueDate, existingImages } = req.body;
+
+  if (typeof existingImages === 'string') {
+    try {
+      existingImages = JSON.parse(existingImages);
+    } catch (e) {
+      existingImages = [];
+    }
+  } else if (!existingImages) {
+    existingImages = [];
+  }
 
   if (typeof items === 'string') {
     try {
@@ -342,7 +353,14 @@ export const update = async (req, res) => {
   if (accountId !== undefined) sale.accountId = accountId || null;
   if (notes !== undefined) sale.notes = (notes || '').trim();
   if (dueDate !== undefined) sale.dueDate = dueDate ? new Date(dueDate) : null;
-  if (req.file) sale.image = req.file.path;
+  
+  if (req.files && req.files.length > 0) {
+    const newImages = req.files.map(f => f.path);
+    sale.images = [...existingImages, ...newImages];
+  } else {
+    sale.images = existingImages;
+  }
+  sale.image = sale.images.length > 0 ? sale.images[0] : null;
 
   const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : sale.totalGrossWeight;
   const cutTotal = totalSHCut != null ? Number(totalSHCut) : sale.totalSHCut;

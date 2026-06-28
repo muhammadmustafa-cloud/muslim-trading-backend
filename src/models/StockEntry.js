@@ -40,7 +40,8 @@ export const stockEntrySchema = new mongoose.Schema(
     truckNumber: { type: String, trim: true, default: '' },
     gatePassNo: { type: String, trim: true, default: '' },
     goods: { type: String, trim: true, default: '' },
-    image: { type: String, default: null },
+    image: { type: String, default: null }, // Legacy single image
+    images: [{ type: String }], // Array for multiple images
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     notes: { type: String, trim: true, default: '' },
   },

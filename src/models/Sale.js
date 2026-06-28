@@ -30,7 +30,8 @@ export const saleSchema = new mongoose.Schema(
     truckNumber: { type: String, trim: true, default: '' },
     gatePassNo: { type: String, trim: true, default: '' },
     goods: { type: String, trim: true, default: '' },
-    image: { type: String, default: null },
+    image: { type: String, default: null }, // Legacy single image
+    images: [{ type: String }], // Array for multiple images
     
     amountReceived: { type: Number, default: 0 },
     totalBardanaAmount: { type: Number, default: 0 },

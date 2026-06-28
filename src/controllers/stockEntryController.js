@@ -164,7 +164,8 @@ export const create = async (req, res) => {
     truckNumber: (truckNumber || '').trim(),
     gatePassNo: (gatePassNo || '').trim(),
     goods: (goods || '').trim(),
-    image: req.file ? req.file.path : null,
+    image: req.files && req.files.length > 0 ? req.files[0].path : null,
+    images: req.files ? req.files.map(f => f.path) : [],
     accountId: accountId || null,
     notes: (notes || '').trim(),
   });
@@ -199,7 +200,17 @@ export const update = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Stock entry not found' });
   }
   
-  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight } = req.body;
+  let { date, supplierId, items, totalGrossWeight, totalSHCut, amountPaid, totalBardanaAmount, totalMazdori, extras, truckNumber, gatePassNo, goods, accountId, notes, millWeight, supplierWeight, existingImages } = req.body;
+
+  if (typeof existingImages === 'string') {
+    try {
+      existingImages = JSON.parse(existingImages);
+    } catch (e) {
+      existingImages = [];
+    }
+  } else if (!existingImages) {
+    existingImages = [];
+  }
 
   if (typeof items === 'string') {
     try {
@@ -227,7 +238,14 @@ export const update = async (req, res) => {
   if (req.body.dueDate !== undefined) {
     entry.dueDate = req.body.dueDate ? toUTCStartOfDay(req.body.dueDate) : null;
   }
-  if (req.file) entry.image = req.file.path;
+  
+  if (req.files && req.files.length > 0) {
+    const newImages = req.files.map(f => f.path);
+    entry.images = [...existingImages, ...newImages];
+  } else {
+    entry.images = existingImages;
+  }
+  entry.image = entry.images.length > 0 ? entry.images[0] : null;
 
   const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : entry.totalGrossWeight;
   const cutTotal = totalSHCut != null ? Number(totalSHCut) : entry.totalSHCut;
