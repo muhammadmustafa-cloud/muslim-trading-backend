@@ -164,7 +164,7 @@ export const create = async (req, res) => {
     truckNumber: (truckNumber || '').trim(),
     gatePassNo: (gatePassNo || '').trim(),
     goods: (goods || '').trim(),
-    image: req.file ? req.file.filename : null,
+    image: req.file ? req.file.path : null,
     accountId: accountId || null,
     notes: (notes || '').trim(),
   });
@@ -227,7 +227,7 @@ export const update = async (req, res) => {
   if (req.body.dueDate !== undefined) {
     entry.dueDate = req.body.dueDate ? toUTCStartOfDay(req.body.dueDate) : null;
   }
-  if (req.file) entry.image = req.file.filename;
+  if (req.file) entry.image = req.file.path;
 
   const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : entry.totalGrossWeight;
   const cutTotal = totalSHCut != null ? Number(totalSHCut) : entry.totalSHCut;

@@ -284,7 +284,7 @@ export const create = async (req, res) => {
     notes: (notes || '').trim(),
     dueDate: dueDate ? new Date(dueDate) : null,
     paymentStatus,
-    image: req.file ? req.file.filename : null,
+    image: req.file ? req.file.path : null,
   });
   const populated = await Sale.findById(sale._id)
     .populate('customerId', 'name')
@@ -342,7 +342,7 @@ export const update = async (req, res) => {
   if (accountId !== undefined) sale.accountId = accountId || null;
   if (notes !== undefined) sale.notes = (notes || '').trim();
   if (dueDate !== undefined) sale.dueDate = dueDate ? new Date(dueDate) : null;
-  if (req.file) sale.image = req.file.filename;
+  if (req.file) sale.image = req.file.path;
 
   const grossTotal = totalGrossWeight != null ? Number(totalGrossWeight) : sale.totalGrossWeight;
   const cutTotal = totalSHCut != null ? Number(totalSHCut) : sale.totalSHCut;
