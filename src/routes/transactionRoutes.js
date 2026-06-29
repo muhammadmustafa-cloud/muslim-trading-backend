@@ -8,8 +8,8 @@ const router = Router();
 
 router.get('/', protect, asyncHandler(transactionController.list));
 router.get('/:id', protect, asyncHandler(transactionController.getById));
-router.post('/', protect, upload.single('image'), asyncHandler(transactionController.create));
-router.put('/:id', protect, upload.single('image'), asyncHandler(transactionController.update));
+router.post('/', protect, upload.array('images', 10), asyncHandler(transactionController.create));
+router.put('/:id', protect, upload.array('images', 10), asyncHandler(transactionController.update));
 router.delete('/:id', protect, asyncHandler(transactionController.remove));
 
 export default router;

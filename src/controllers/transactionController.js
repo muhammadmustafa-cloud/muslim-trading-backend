@@ -74,7 +74,8 @@ export const list = async (req, res) => {
           referenceId: '$_id', supplierId: 1, customerId: 1, mazdoorId: 1,
           stockEntryId: 1, saleId: 1, machineryPurchaseId: 1,
           taxTypeId: 1, expenseTypeId: 1, rawMaterialHeadId: 1,
-          isSignatureBook: 1, paymentMethod: 1, chequeNumber: 1, chequeDate: 1
+          isSignatureBook: 1, paymentMethod: 1, chequeNumber: 1, chequeDate: 1,
+          image: 1, images: 1
       } }
     ];
 
@@ -91,7 +92,8 @@ export const list = async (req, res) => {
                 date: 1, type: { $literal: 'sale' }, fromAccountId: { $literal: null },
                 toAccountId: '$accountId', amount: '$amountReceived',
                 category: { $literal: 'Sale' }, source: { $literal: 'sale' },
-                referenceId: '$_id', customerId: 1, notes: 1, items: 1, itemId: 1
+                referenceId: '$_id', customerId: 1, notes: 1, items: 1, itemId: 1,
+                image: 1, images: 1
             } }
           ]
         }
@@ -110,7 +112,8 @@ export const list = async (req, res) => {
                 toAccountId: { $literal: null },
                 amount: { $cond: [{ $gt: ["$amountPaid", 0] }, "$amountPaid", "$amount"] },
                 category: { $literal: 'Purchase' }, source: { $literal: 'stock_entry' },
-                referenceId: '$_id', supplierId: 1, notes: 1, items: 1, itemId: 1
+                referenceId: '$_id', supplierId: 1, notes: 1, items: 1, itemId: 1,
+                image: 1, images: 1
             } }
           ]
         }
@@ -272,7 +275,8 @@ export const create = async (req, res) => {
     taxTypeId: taxTypeId || null,
     expenseTypeId: expenseTypeId || null,
     rawMaterialHeadId: rawMaterialHeadId || null,
-    image: req.file ? req.file.path : null,
+    image: req.files && req.files.length > 0 ? req.files[0].path : null,
+    images: req.files ? req.files.map(f => f.path) : [],
     paymentMethod: paymentMethod || 'cash',
     chequeNumber: (chequeNumber || '').trim(),
     chequeDate: chequeDate ? new Date(chequeDate) : null,
@@ -313,7 +317,18 @@ export const getById = async (req, res) => {
 export const update = async (req, res) => {
   const { Transaction } = req.models;
   const { id } = req.params;
-  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate, isSignatureBook } = req.body;
+  const { type, fromAccountId, toAccountId, amount, category, note, supplierId, customerId, mazdoorId, machineryPurchaseId, taxTypeId, expenseTypeId, rawMaterialHeadId, date, paymentMethod, chequeNumber, chequeDate, isSignatureBook, existingImages } = req.body;
+
+  let existingImagesParsed = [];
+  if (typeof existingImages === 'string') {
+    try {
+      existingImagesParsed = JSON.parse(existingImages);
+    } catch (e) {
+      existingImagesParsed = [];
+    }
+  } else if (existingImages) {
+    existingImagesParsed = existingImages;
+  }
 
   const transaction = await Transaction.findById(id);
   if (!transaction) {
@@ -361,9 +376,13 @@ export const update = async (req, res) => {
     transaction.isSignatureBook = isSignatureBook === 'true' || isSignatureBook === true;
   }
 
-  if (req.file) {
-    transaction.image = req.file.path;
+  if (req.files && req.files.length > 0) {
+    const newImages = req.files.map(f => f.path);
+    transaction.images = [...existingImagesParsed, ...newImages];
+  } else {
+    transaction.images = existingImagesParsed;
   }
+  transaction.image = transaction.images.length > 0 ? transaction.images[0] : null;
 
   await transaction.save();
 
