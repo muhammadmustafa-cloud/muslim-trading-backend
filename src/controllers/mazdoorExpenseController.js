@@ -70,3 +70,69 @@ export const create = async (req, res) => {
   res.status(201).json({ success: true, data: populated });
 };
 
+export const update = async (req, res) => {
+  const { MazdoorExpense, MazdoorItem, Transaction } = req.models;
+  const { date, mazdoorId, mazdoorItemId, bags } = req.body;
+
+  if (!mazdoorId || !mazdoorItemId || bags == null) {
+    return res.status(400).json({ success: false, message: 'mazdoorId, mazdoorItemId, and bags are required' });
+  }
+
+  const bagsNum = Number(bags);
+  if (isNaN(bagsNum) || bagsNum < 0) {
+    return res.status(400).json({ success: false, message: 'bags must be a non-negative number' });
+  }
+
+  const item = await MazdoorItem.findById(mazdoorItemId).lean();
+  if (!item) return res.status(400).json({ success: false, message: 'Mazdoor item not found' });
+
+  const totalAmount = (Number(item.rate) || 0) * bagsNum;
+  if (totalAmount <= 0) {
+    return res.status(400).json({ success: false, message: 'Total amount must be greater than 0' });
+  }
+
+  const expense = await MazdoorExpense.findById(req.params.id);
+  if (!expense) return res.status(404).json({ success: false, message: 'Expense not found' });
+
+  // Update transaction if exists
+  if (expense.transactionId) {
+    await Transaction.findByIdAndUpdate(expense.transactionId, {
+      date: toUTCStartOfDay(date),
+      amount: totalAmount,
+      note: `${item.name} × ${bagsNum} bag(s)`,
+      mazdoorId
+    });
+  }
+
+  expense.date = toUTCStartOfDay(date);
+  expense.mazdoorId = mazdoorId;
+  expense.mazdoorItemId = mazdoorItemId;
+  expense.bags = bagsNum;
+  expense.totalAmount = totalAmount;
+  await expense.save();
+
+  const populated = await MazdoorExpense.findById(expense._id)
+    .populate('mazdoorId', 'name')
+    .populate('mazdoorItemId', 'name rate')
+    .populate('accountId', 'name')
+    .lean();
+
+  res.json({ success: true, data: populated });
+};
+
+export const remove = async (req, res) => {
+  const { MazdoorExpense, Transaction } = req.models;
+  const expense = await MazdoorExpense.findById(req.params.id);
+  
+  if (!expense) {
+    return res.status(404).json({ success: false, message: 'Expense not found' });
+  }
+
+  if (expense.transactionId) {
+    await Transaction.findByIdAndDelete(expense.transactionId);
+  }
+
+  await MazdoorExpense.findByIdAndDelete(req.params.id);
+  res.json({ success: true, message: 'Expense deleted successfully' });
+};
+

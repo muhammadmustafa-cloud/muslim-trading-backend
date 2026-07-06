@@ -6,5 +6,7 @@ const router = Router();
 
 router.get('/', asyncHandler(mazdoorExpenseController.list));
 router.post('/', asyncHandler(mazdoorExpenseController.create));
+router.put('/:id', asyncHandler(mazdoorExpenseController.update));
+router.delete('/:id', asyncHandler(mazdoorExpenseController.remove));
 
 export default router;
