@@ -19,11 +19,11 @@ export const list = async (req, res) => {
 
 export const create = async (req, res) => {
   const { MazdoorExpense, MazdoorItem, Transaction, Account } = req.models;
-  const { date, mazdoorId, mazdoorItemId, bags, accountId } = req.body;
-  if (!mazdoorId || !mazdoorItemId || bags == null || !accountId) {
+  const { date, mazdoorId, mazdoorItemId, bags } = req.body;
+  if (!mazdoorId || !mazdoorItemId || bags == null) {
     return res.status(400).json({
       success: false,
-      message: 'mazdoorId, mazdoorItemId, bags and accountId are required',
+      message: 'mazdoorId, mazdoorItemId, and bags are required',
     });
   }
   const bagsNum = Number(bags);
@@ -41,20 +41,10 @@ export const create = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Total amount must be greater than 0 (check item rate and bags)' });
   }
 
-  const account = await Account.findById(accountId).lean();
-  if (!account) return res.status(400).json({ success: false, message: 'Account not found' });
-  const totalBalance = (account.openingBalance ?? 0) + (await getAccountBalance(Transaction, accountId));
-  if (totalBalance < totalAmount) {
-    return res.status(400).json({
-      success: false,
-      message: `Insufficient balance. Available: ${totalBalance}`,
-    });
-  }
-
   const transaction = await Transaction.create({
     date: toUTCStartOfDay(date),
-    type: 'withdraw',
-    fromAccountId: accountId,
+    type: 'accrual',
+    fromAccountId: null,
     toAccountId: null,
     amount: totalAmount,
     category: 'mazdoor_expense',
@@ -68,7 +58,7 @@ export const create = async (req, res) => {
     mazdoorItemId,
     bags: bagsNum,
     totalAmount,
-    accountId,
+    accountId: null,
     transactionId: transaction._id,
   });
 

@@ -7,7 +7,7 @@ export const mazdoorExpenseSchema = new mongoose.Schema(
     mazdoorItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'MazdoorItem', required: true },
     bags: { type: Number, required: true, min: 0 },
     totalAmount: { type: Number, required: true, min: 0 },
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },
+    accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null },
   },
   { timestamps: true }
