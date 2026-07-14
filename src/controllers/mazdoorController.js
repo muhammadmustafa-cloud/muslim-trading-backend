@@ -61,15 +61,13 @@ export const update = async (req, res) => {
  * Mazdoor history: salary/udhaar diya (withdraw) + udhaar wapas liya (deposit with category udhaar_received).
  * Query: dateFrom, dateTo.
  */
-export const getHistory = async (req, res) => {
-  const { Mazdoor, Transaction } = req.models;
-  const mazdoor = await Mazdoor.findById(req.params.id).lean();
+export const buildMazdoorLedger = async (models, mazdoorId, dateFrom, dateTo) => {
+  const { Mazdoor, Transaction } = models;
+  const mazdoor = await Mazdoor.findById(mazdoorId).lean();
   if (!mazdoor) {
-    return res.status(404).json({ success: false, message: 'Mazdoor not found' });
+    throw new Error('Mazdoor not found');
   }
-  const { dateFrom, dateTo } = req.query;
-  const mId = new mongoose.Types.ObjectId(req.params.id);
-  
+  const mId = new mongoose.Types.ObjectId(mazdoorId);
   const dateFilter = buildUTCDateFilter(dateFrom, dateTo);
 
   // Transactions (Payments/Advances)
@@ -88,16 +86,23 @@ export const getHistory = async (req, res) => {
     .filter((t) => t.category === 'salary_accrual' || t.category === 'mazdoor_expense')
     .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   
-  res.json({
-    success: true,
-    data: {
-      name: mazdoor.name,
-      monthlySalary: mazdoor.monthlySalary || 0,
-      transactions,
-      totalPaid,
-      totalReceived,
-      totalEarned,
-      balance: totalEarned - (totalPaid - totalReceived),
-    },
-  });
+  return {
+    name: mazdoor.name,
+    monthlySalary: mazdoor.monthlySalary || 0,
+    transactions,
+    totalPaid,
+    totalReceived,
+    totalEarned,
+    balance: totalEarned - (totalPaid - totalReceived),
+  };
+};
+
+export const getHistory = async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    const data = await buildMazdoorLedger(req.models, req.params.id, dateFrom, dateTo);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(404).json({ success: false, message: error.message });
+  }
 };

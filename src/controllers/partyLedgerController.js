@@ -9,10 +9,8 @@ import { toUTCStartOfDay, buildUTCDateFilter } from '../utils/dateUtils.js';
  * Returns one row per INVOICE (not per item), with aggregated weight/MUN/bags,
  * plus payment rows, all with a running balance.
  */
-export const getPartyLedger = async (req, res) => {
-  const { Customer, Supplier, Sale, StockEntry, Transaction, Item } = req.models;
-  const { role, dateFrom, dateTo, itemId } = req.query;
-  const personId = req.params.id;
+export const buildPartyLedger = async (models, personId, role, dateFrom, dateTo, itemId) => {
+  const { Customer, Supplier, Sale, StockEntry, Transaction, Item } = models;
 
   // ── 1. Resolve the person and their linked counterpart ──
   let person = null;
@@ -26,7 +24,7 @@ export const getPartyLedger = async (req, res) => {
 
   if (role === 'supplier') {
     person = await Supplier.findById(personId).populate('linkedCustomerId', 'name').lean();
-    if (!person) return res.status(404).json({ success: false, message: 'Supplier not found' });
+    if (!person) throw new Error('Supplier not found');
     supplierId = personId;
     customerId = person.linkedCustomerId?._id?.toString() || null;
     isLinked = !!customerId;
@@ -37,7 +35,7 @@ export const getPartyLedger = async (req, res) => {
   } else {
     // Default to customer
     person = await Customer.findById(personId).populate('linkedSupplierId', 'name').lean();
-    if (!person) return res.status(404).json({ success: false, message: 'Customer not found' });
+    if (!person) throw new Error('Customer not found');
     customerId = personId;
     supplierId = person.linkedSupplierId?._id?.toString() || null;
     isLinked = !!supplierId;
@@ -373,16 +371,24 @@ export const getPartyLedger = async (req, res) => {
   };
 
   // ── 9. Respond ──
-  res.json({
-    success: true,
-    data: {
-      name: personName,
-      phone: personPhone,
-      address: personAddress,
-      isLinked,
-      linkedRole: isLinked ? (role === 'supplier' ? 'customer' : 'supplier') : null,
-      ledger,
-      summary,
-    },
-  });
+  return {
+    name: personName,
+    phone: personPhone,
+    address: personAddress,
+    isLinked,
+    linkedRole: isLinked ? (role === 'supplier' ? 'customer' : 'supplier') : null,
+    ledger,
+    summary,
+  };
+};
+
+export const getPartyLedger = async (req, res) => {
+  try {
+    const { role, dateFrom, dateTo, itemId } = req.query;
+    const personId = req.params.id;
+    const data = await buildPartyLedger(req.models, personId, role, dateFrom, dateTo, itemId);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(404).json({ success: false, message: error.message });
+  }
 };

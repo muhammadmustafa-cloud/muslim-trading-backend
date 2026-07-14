@@ -72,17 +72,16 @@ export const update = async (req, res) => {
  * Item khata (ledger): purchases (stock entries), sales, profit.
  * Query: dateFrom, dateTo (YYYY-MM-DD).
  */
-export const getKhata = async (req, res) => {
-  const { Item, StockEntry, Sale } = req.models;
-  const item = await Item.findById(req.params.id).populate(itemListPopulate).lean();
+export const buildItemKhata = async (models, itemIdParam, dateFrom, dateTo) => {
+  const { Item, StockEntry, Sale } = models;
+  const item = await Item.findById(itemIdParam).populate(itemListPopulate).lean();
   if (!item) {
-    return res.status(404).json({ success: false, message: 'Item not found' });
+    throw new Error('Item not found');
   }
-  const { dateFrom, dateTo } = req.query;
   const dateFilterObj = buildUTCDateFilter(dateFrom, dateTo);
   const dateFilter = dateFilterObj.date || {};
   const hasDateFilter = Object.keys(dateFilter).length > 0;
-  const itemId = new mongoose.Types.ObjectId(req.params.id);
+  const itemId = new mongoose.Types.ObjectId(itemIdParam);
 
   const [purchasesRaw, salesRaw] = await Promise.all([
     StockEntry.aggregate([
@@ -209,26 +208,33 @@ export const getKhata = async (req, res) => {
 
   const isWarehouseItem = !!item.linkedWarehouseCustomerId;
 
-  res.json({
-    success: true,
-    data: {
-      name: item.name,
-      category: item.categoryId?.name ?? '',
-      quality: item.quality ?? '',
-      purchases: isWarehouseItem ? purchases.map(p => ({ ...p, amount: 0, rate: 0 })) : purchases,
-      sales: isWarehouseItem ? salesWithItem.map(s => ({ ...s, totalAmount: 0, rate: 0 })) : salesWithItem,
-      totalCost: isWarehouseItem ? 0 : totalCost,
-      totalRevenue: isWarehouseItem ? 0 : totalRevenue,
-      totalBagsPurchased,
-      totalBagsSold,
-      stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
-      stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
-      totalMunPurchased,
-      totalMunSold,
-      profit: isWarehouseItem ? 0 : profit,
-      isWarehouseItem,
-    },
-  });
+  return {
+    name: item.name,
+    category: item.categoryId?.name ?? '',
+    quality: item.quality ?? '',
+    purchases: isWarehouseItem ? purchases.map(p => ({ ...p, amount: 0, rate: 0 })) : purchases,
+    sales: isWarehouseItem ? salesWithItem.map(s => ({ ...s, totalAmount: 0, rate: 0 })) : salesWithItem,
+    totalCost: isWarehouseItem ? 0 : totalCost,
+    totalRevenue: isWarehouseItem ? 0 : totalRevenue,
+    totalBagsPurchased,
+    totalBagsSold,
+    stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
+    stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
+    totalMunPurchased,
+    totalMunSold,
+    profit: isWarehouseItem ? 0 : profit,
+    isWarehouseItem,
+  };
+};
+
+export const getKhata = async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    const data = await buildItemKhata(req.models, req.params.id, dateFrom, dateTo);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(404).json({ success: false, message: error.message });
+  }
 };
 
 /**

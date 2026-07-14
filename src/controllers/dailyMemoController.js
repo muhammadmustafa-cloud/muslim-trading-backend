@@ -238,9 +238,9 @@ const buildLedgerRows = (transactions) => {
  * GET /api/daily-memo
  * Universal Daily Ledger — strictly follows CASH FLOW using the Transaction model.
  */
-export const getDailyMemo = async (req, res) => {
-  const { Transaction, Account, Customer, Supplier, Mazdoor, DailyDastiEntry } = req.models;
-  const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = req.query;
+export const buildDailyMemo = async (models, filters = {}) => {
+  const { Transaction, Account, Customer, Supplier, Mazdoor, DailyDastiEntry } = models;
+  const { dateFrom, dateTo, accountId, customerId, supplierId, mazdoorId } = filters;
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const fromStr = dateFrom || todayStr;
@@ -347,9 +347,7 @@ export const getDailyMemo = async (req, res) => {
 
   const closingBalance = openingBalance + totalIn - totalOut;
 
-  res.set("Cache-Control", "no-store");
-  res.json({
-    success: true,
+  return {
     data: rows,
     dastiEntries: dastiEntries.map((d) => ({
       ...d,
@@ -361,6 +359,16 @@ export const getDailyMemo = async (req, res) => {
       totalOut: Math.round(totalOut),
       net: Math.round(totalIn - totalOut),
       closingBalance: Math.round(closingBalance),
-    },
-  });
+    }
+  };
+};
+
+export const getDailyMemo = async (req, res) => {
+  try {
+    const result = await buildDailyMemo(req.models, req.query);
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
