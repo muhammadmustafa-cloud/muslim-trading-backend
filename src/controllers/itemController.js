@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { buildUTCDateFilter } from '../utils/dateUtils.js';
 
-const itemListSelect = 'name categoryId quality';
+const itemListSelect = 'name categoryId quality linkedWarehouseCustomerId';
 const itemListPopulate = { path: 'categoryId', select: 'name' };
 
 export const list = async (req, res) => {
@@ -197,17 +197,32 @@ export const getKhata = async (req, res) => {
     quality: item.quality ?? '',
   }));
 
-  const totalCost = purchases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-  const totalBagsPurchased = purchases.reduce((sum, p) => sum + (Number(p.kattay) || 0), 0);
-  const totalBagsSold = sales.reduce((sum, s) => sum + (Number(s.kattay) || 0), 0);
-  const totalWeightPurchased = purchases.reduce((sum, p) => sum + (Number(p.receivedWeight) || 0), 0);
-  const totalWeightSold = sales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+  const linkedWarehouseIdStr = item.linkedWarehouseCustomerId ? item.linkedWarehouseCustomerId.toString() : null;
+  const isWarehouseItem = !!item.linkedWarehouseCustomerId;
+
+  const processedPurchases = purchases.map(p => {
+    // Normal purchases keep their amounts
+    return p;
+  });
+
+  const processedSales = salesWithItem.map(s => {
+    // Only mask if the sale is directly to the connected warehouse customer
+    const isTransferToWarehouse = linkedWarehouseIdStr && s.customerId && s.customerId._id.toString() === linkedWarehouseIdStr;
+    if (isTransferToWarehouse) {
+      return { ...s, totalAmount: 0, rate: 0 };
+    }
+    return s;
+  });
+
+  const totalCost = processedPurchases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalRevenue = processedSales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+  const totalBagsPurchased = processedPurchases.reduce((sum, p) => sum + (Number(p.kattay) || 0), 0);
+  const totalBagsSold = processedSales.reduce((sum, s) => sum + (Number(s.kattay) || 0), 0);
+  const totalWeightPurchased = processedPurchases.reduce((sum, p) => sum + (Number(p.receivedWeight) || 0), 0);
+  const totalWeightSold = processedSales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
   const totalMunPurchased = totalWeightPurchased / 40;
   const totalMunSold = totalWeightSold / 40;
   const profit = totalRevenue - totalCost;
-
-  const isWarehouseItem = !!item.linkedWarehouseCustomerId;
 
   res.json({
     success: true,
@@ -215,17 +230,17 @@ export const getKhata = async (req, res) => {
       name: item.name,
       category: item.categoryId?.name ?? '',
       quality: item.quality ?? '',
-      purchases: isWarehouseItem ? purchases.map(p => ({ ...p, amount: 0, rate: 0 })) : purchases,
-      sales: isWarehouseItem ? salesWithItem.map(s => ({ ...s, totalAmount: 0, rate: 0 })) : salesWithItem,
-      totalCost: isWarehouseItem ? 0 : totalCost,
-      totalRevenue: isWarehouseItem ? 0 : totalRevenue,
+      purchases: processedPurchases,
+      sales: processedSales,
+      totalCost,
+      totalRevenue,
       totalBagsPurchased,
       totalBagsSold,
       stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
       stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
       totalMunPurchased,
       totalMunSold,
-      profit: isWarehouseItem ? 0 : profit,
+      profit,
       isWarehouseItem,
     },
   });
