@@ -239,9 +239,13 @@ export const getKhata = async (req, res) => {
       stockBalanceBags: Math.max(0, totalBagsPurchased - totalBagsSold),
       stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
       totalMunPurchased,
+      stockBalanceMun: Math.max(0, totalMunPurchased - totalMunSold),
+      totalMunPurchased,
       totalMunSold,
       profit,
       isWarehouseItem,
+      openingBags: item.openingBags || 0,
+      openingWeight: item.openingWeight || 0,
     },
   });
 };
@@ -303,6 +307,9 @@ export const getSubItemKhata = async (req, res) => {
     data: {
       name: item.name,
       parentName: item.parentId ? item.parentId.name : '—',
+      openingBags: item.openingBags || 0,
+      openingWeight: item.openingWeight || 0,
+      openingMun: (item.openingWeight || 0) / 40,
       totalRevenue,
       totalBagsSold,
       totalMunSold,
@@ -443,8 +450,8 @@ export const getSubItemsSalesSummary = async (req, res) => {
       inBags: acc.inBags + curr.inBags
     }), { inWeight: 0, inBags: 0 });
 
-    const totalInWeight = salesMerged.inWeight + purchasesMerged.inWeight;
-    const totalInBags = salesMerged.inBags + purchasesMerged.inBags;
+    const totalInWeight = salesMerged.inWeight + purchasesMerged.inWeight + (si.openingWeight || 0);
+    const totalInBags = salesMerged.inBags + purchasesMerged.inBags + (si.openingBags || 0);
     const outW = salesMerged.outWeight;
     
     return {
