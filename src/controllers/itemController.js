@@ -41,6 +41,8 @@ export const create = async (req, res) => {
     quality: (quality || '').trim(),
     parentId: parentId || null,
     linkedWarehouseCustomerId: req.body.linkedWarehouseCustomerId || null,
+    openingBags: req.body.openingBags || 0,
+    openingWeight: req.body.openingWeight || 0,
   });
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.status(201).json({ success: true, data: populated });
@@ -62,6 +64,8 @@ export const update = async (req, res) => {
   if (quality !== undefined) item.quality = (quality || '').trim();
   if (parentId !== undefined) item.parentId = parentId || null;
   if (req.body.linkedWarehouseCustomerId !== undefined) item.linkedWarehouseCustomerId = req.body.linkedWarehouseCustomerId || null;
+  if (req.body.openingBags !== undefined) item.openingBags = req.body.openingBags || 0;
+  if (req.body.openingWeight !== undefined) item.openingWeight = req.body.openingWeight || 0;
   await item.save();
   const populated = await Item.findById(item._id).populate(itemListPopulate).lean();
   res.json({ success: true, data: populated });
@@ -458,6 +462,8 @@ export const getSubItemsSalesSummary = async (req, res) => {
       _id: si._id,
       name: si.name,
       quality: si.quality,
+      openingBags: si.openingBags || 0,
+      openingWeight: si.openingWeight || 0,
       inBags: totalInBags,
       inWeight: totalInWeight,
       inMun: totalInWeight / 40,
@@ -612,6 +618,34 @@ export const getWarehouseItemLedger = async (req, res) => {
   const ledger = [];
   let balanceBags = 0;
   let balanceWeight = 0;
+
+  // Add Old Stock (Opening Balances) for relevant sub-items
+  subItems.forEach(si => {
+    // If a specific sub-item is filtered, only include its Old Stock
+    if (filterSubItemId && filterSubItemId.trim() !== '' && si.name.toLowerCase().trim() !== filterSubItemId.toLowerCase().trim()) {
+      return;
+    }
+    
+    if ((si.openingBags || 0) > 0 || (si.openingWeight || 0) > 0) {
+      ledger.push({
+        _id: 'old-stock-' + si._id.toString(),
+        date: new Date('1970-01-01'), // very old date to ensure it appears at the top
+        type: 'IN',
+        source: 'Opening Balance',
+        partyName: 'Old Stock',
+        itemName: si.name,
+        bagsIn: si.openingBags || 0,
+        weightIn: si.openingWeight || 0,
+        bagsOut: 0,
+        weightOut: 0,
+        rate: 0,
+        amount: 0,
+        note: 'System Entry (Old Stock)',
+        truckNumber: '',
+        isOldStock: true
+      });
+    }
+  });
 
   purchasesRaw.forEach(p => {
     const itm = p.items;
