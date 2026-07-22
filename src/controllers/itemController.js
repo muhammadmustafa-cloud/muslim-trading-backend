@@ -763,7 +763,7 @@ export const getWarehouseItemLedger = async (req, res) => {
     data: {
       itemName: mainItem.name,
       subItemsList: dropdownList,
-      ledger: ledger.reverse(), // Reverse to show latest on top in UI
+      ledger: ledger, // Return ascending (oldest first) as requested by user
       totals: {
         totalInBags,
         totalInWeight,
